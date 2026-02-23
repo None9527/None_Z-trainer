@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 :: ============================================================================
-:: None Trainer v2 - Windows Startup Script
+:: None Trainer - Windows Startup Script
 :: ============================================================================
 
 set "SCRIPT_DIR=%~dp0"
@@ -71,7 +71,7 @@ if "%~1"=="-h" goto :show_help
     goto :parse_args
 
 :show_help
-echo None Trainer v2 Startup Script
+echo None Trainer Startup Script
 echo.
 echo Usage: start.bat [options]
 echo.
@@ -117,14 +117,14 @@ echo   ^|  \^| ^| ___  _ __   ___    ^| ^|_ __ __ _ _ _ __   ___ _ __
 echo   ^| . ` ^|/ _ \^| '_ \ / _ \   ^| ^| '__/ _` ^| ^| '_ \ / _ \ '__^|
 echo   ^| ^|\  ^| (_) ^| ^| ^| ^|  __/   ^| ^| ^| ^| (_^| ^| ^| ^| ^| ^|  __/ ^|
 echo   ^|_^| \_^|\___/^|_^| ^|_^|\___^|   \_/_^|  \__,_^|_^|_^| ^|_^|\___^|_^|
-echo                                                       v2
+echo                                                       
 echo.
 
 :: ============================================================================
 :: Display Configuration
 :: ============================================================================
 echo ==================================================
-echo    Service Configuration (v2)
+echo    Service Configuration
 echo ==================================================
 echo    Port:        %TRAINER_PORT%
 echo    Host:        %TRAINER_HOST%
@@ -166,7 +166,7 @@ echo.
 :: ============================================================================
 :: Start Server
 :: ============================================================================
-echo Starting Web UI (v2)...
+echo Starting Web UI...
 echo.
 echo    URL: http://localhost:%TRAINER_PORT%
 echo.

@@ -3,11 +3,11 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 :: ============================================================================
-:: None Trainer v2 - Windows Setup Script
+:: None Trainer - Windows Setup Script
 :: ============================================================================
 
 echo ================================================
-echo    None Trainer v2 - Setup
+echo    None Trainer - Setup
 echo ================================================
 echo.
 

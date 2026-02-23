@@ -12,6 +12,9 @@ import sys
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
+import sys
+
+_IS_WIN = sys.platform == "win32"
 
 from ..domain.training.repositories import ITrainingRunner
 
@@ -95,18 +98,22 @@ class SubprocessTrainingRunner(ITrainingRunner):
         trainer_core = str(PROJECT_ROOT / "backend" / "trainer_core")
         backend = str(PROJECT_ROOT / "backend")
         existing_python_path = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = f"{trainer_core}:{backend}:{existing_python_path}"
+        env["PYTHONPATH"] = f"{trainer_core}{os.pathsep}{backend}{os.pathsep}{existing_python_path}"
 
         logger.info(f"Starting training: {' '.join(cmd)}")
 
-        proc = subprocess.Popen(
-            cmd,
+        popen_kwargs = dict(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=env,
             cwd=str(PROJECT_ROOT),
-            start_new_session=True,
         )
+        if _IS_WIN:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+
+        proc = subprocess.Popen(cmd, **popen_kwargs)
 
         pid = self._next_id
         self._next_id += 1
@@ -124,13 +131,21 @@ class SubprocessTrainingRunner(ITrainingRunner):
 
     def stop(self, process_id: int) -> None:
         """Stop a running training process immediately."""
-        import os, signal
         proc = self._processes.get(process_id)
         if proc and proc.poll() is None:
             try:
-                # Kill entire process group to ensure child processes are also killed
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
+                if _IS_WIN:
+                    # Windows: use taskkill to kill process tree
+                    subprocess.call(
+                        ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                else:
+                    # Linux: kill entire process group
+                    import signal
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
                 proc.kill()
             proc.wait()
             logger.info(f"Training {process_id} killed")
@@ -147,9 +162,27 @@ class SubprocessTrainingRunner(ITrainingRunner):
         proc = self._processes.get(process_id)
         if proc is None or proc.stdout is None:
             return None
-        import select
-        if select.select([proc.stdout], [], [], 0)[0]:
-            line = proc.stdout.readline()
-            if line:
-                return line.decode("utf-8", errors="replace").rstrip()
+        if _IS_WIN:
+            # Windows: use peek via ctypes or just try readline with timeout
+            import msvcrt
+            if msvcrt.kbhit() or True:  # Always try on Windows
+                try:
+                    import threading
+                    result = [None]
+                    def _read():
+                        result[0] = proc.stdout.readline()
+                    t = threading.Thread(target=_read, daemon=True)
+                    t.start()
+                    t.join(timeout=0.05)
+                    if result[0]:
+                        return result[0].decode("utf-8", errors="replace").rstrip()
+                except Exception:
+                    pass
+        else:
+            # Linux: use select for non-blocking read
+            import select
+            if select.select([proc.stdout], [], [], 0)[0]:
+                line = proc.stdout.readline()
+                if line:
+                    return line.decode("utf-8", errors="replace").rstrip()
         return None
