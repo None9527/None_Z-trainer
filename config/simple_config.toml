@@ -1,0 +1,25 @@
+# AC-RF 简化训练配置
+# 只需配置必要参数，其他参数自动优化
+
+[model]
+# Transformer 模型路径
+dit = "d:/AI/zimage-trainer/zimage_models/transformer"
+
+# 数据集配置文件路径
+dataset_config = "config/dataset_config.toml"
+
+# 输出目录
+output_dir = "output/acrf_experiment_v1"
+
+[training]
+# 训练参数 - 仅保留最关键的参数
+num_train_epochs = 10
+learning_rate = 1e-4
+
+[optimization]
+# 内存优化开关 - 设置为true自动优化，false禁用
+auto_optimize = true
+
+# 手动覆盖GPU设置 (可选，不配置则自动检测)
+# gpu_tier = "high_end"        # high_end, mid_range, low_end
+# gpu_memory_gb = 8            # GPU显存大小

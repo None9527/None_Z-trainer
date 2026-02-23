@@ -1,0 +1,153 @@
+# SDPA (Scaled Dot-Product Attention) 配置文件示例
+# 在acrf_config.toml的[sdpa]节中添加以下配置
+
+[sdpa]
+# 注意力后端选择
+# 可选值: "sdpa" (默认), "flash" (Flash Attention 2), "_flash_3" (Flash Attention 3)
+attention_backend = "sdpa"
+
+# 启用Flash Attention优化
+enable_flash_attention = false
+
+# SDPA优化级别
+# 可选值: "auto" (自动优化), "fast" (性能优先), "memory_efficient" (内存优先)
+sdpa_optimize_level = "auto"
+
+# 启用内存高效的注意力计算
+use_memory_efficient_attention = true
+
+# 强制使用确定性计算 (可复现结果但性能较低)
+force_deterministic = false
+
+# 注意力dropout率 (0.0-1.0)
+attention_dropout = 0.1
+
+# SDPA批次大小阈值 (批次超过此值时自动启用内存优化)
+sdpa_batch_size_threshold = 8
+
+# 最大序列长度阈值 (超过此值时启用分块计算)
+sdpa_max_sequence_length = 32768
+
+# SDPA设备选择 ("auto", "cuda", "cpu")
+sdpa_device = "auto"
+
+# Flash Attention版本检测 (自动检测可用版本)
+# true: 自动检测并使用最新版本
+# false: 使用指定版本
+auto_detect_flash_attention = true
+
+# =============================================================================
+# 硬件优化建议配置
+# =============================================================================
+
+# A100/H100 高端GPU配置示例
+[sdpa.hardware_high_end]
+attention_backend = "flash"
+sdpa_optimize_level = "fast"
+attention_dropout = 0.1
+use_memory_efficient_attention = true
+force_deterministic = false
+
+# RTX 4090/4080 游戏GPU配置示例
+[sdpa.hardware_gaming]
+attention_backend = "flash"
+sdpa_optimize_level = "auto"
+attention_dropout = 0.05
+use_memory_efficient_attention = true
+force_deterministic = false
+
+# 消费级GPU配置示例
+[sdpa.hardware_consumer]
+attention_backend = "sdpa"
+sdpa_optimize_level = "auto"
+attention_dropout = 0.0
+use_memory_efficient_attention = true
+force_deterministic = false
+
+# CPU配置示例
+[sdpa.hardware_cpu]
+attention_backend = "sdpa"
+sdpa_optimize_level = "memory_efficient"
+attention_dropout = 0.0
+use_memory_efficient_attention = true
+force_deterministic = true
+sdpa_device = "cpu"
+
+# =============================================================================
+# 训练场景优化配置
+# =============================================================================
+
+# 大批次训练配置
+[sdpa.training_large_batch]
+attention_backend = "flash"
+sdpa_optimize_level = "fast"
+use_memory_efficient_attention = true
+sdpa_batch_size_threshold = 4  # 更小的批次阈值
+attention_dropout = 0.1
+
+# 长序列训练配置
+[sdpa.training_long_sequence]
+attention_backend = "flash"
+sdpa_optimize_level = "memory_efficient"
+use_memory_efficient_attention = true
+sdpa_max_sequence_length = 16384  # 更小的序列长度阈值
+attention_dropout = 0.05
+
+# 内存受限环境配置
+[sdpa.training_memory_limited]
+attention_backend = "sdpa"
+sdpa_optimize_level = "memory_efficient"
+use_memory_efficient_attention = true
+force_deterministic = true
+sdpa_batch_size_threshold = 2
+
+# 实验/调试配置 (确保可复现性)
+[sdpa.training_debug]
+attention_backend = "sdpa"
+sdpa_optimize_level = "auto"
+use_memory_efficient_attention = false  # 禁用优化以便调试
+force_deterministic = true
+attention_dropout = 0.0
+
+# =============================================================================
+# 性能基准配置
+# =============================================================================
+
+# 性能测试配置
+[sdpa.benchmark_performance]
+attention_backend = "flash"
+sdpa_optimize_level = "fast"
+use_memory_efficient_attention = true
+force_deterministic = false
+attention_dropout = 0.0
+
+# 内存使用测试配置
+[sdpa.benchmark_memory]
+attention_backend = "sdpa"
+sdpa_optimize_level = "memory_efficient"
+use_memory_efficient_attention = true
+force_deterministic = true
+attention_dropout = 0.0
+sdpa_batch_size_threshold = 16
+
+# =============================================================================
+# 环境变量配置
+# =============================================================================
+# 以下环境变量可以通过SDPA配置自动设置:
+
+# [env]
+# TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9"  # 支持的GPU架构
+# CUDA_DEVICE_MAX_CONNECTIONS=1         # 优化CUDA连接
+# NCCL_ASYNC_ERROR_HANDLING=1          # NCCL错误处理
+# TORCH_CUDNN_V8_API_ENABLED=1         # 启用CuDNN v8 API
+# PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True  # CUDA内存配置
+# TOKENIZERS_PARALLELISM=false         # 禁用tokenizer并行 (避免警告)
+
+# =============================================================================
+# 使用说明
+# =============================================================================
+# 1. 复制 [sdpa] 节内容到你的 acrf_config.toml 文件
+# 2. 根据你的硬件选择合适的配置
+# 3. 运行训练脚本时SDPA配置会自动应用
+# 4. 使用 scripts/sdpa_config_example.py 进行硬件检测和优化配置生成
+# 5. 监控训练过程中的内存使用和计算速度

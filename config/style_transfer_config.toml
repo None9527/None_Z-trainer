@@ -1,0 +1,76 @@
+# Z-Image 结构锁风格迁移训练配置文件
+# Structure-Preserving Style Transfer Training
+# 
+# 核心功能：
+# 输入普通画质图片，输出保持原图几何结构但具有大师级光影色调的图片
+
+[model]
+# Transformer 模型路径
+dit = "/path/to/transformer"
+
+# 输出目录
+output_dir = "output/style_transfer_v1"
+
+# 输出文件名前缀
+output_name = "zimage-style-lora"
+
+[acrf]
+turbo_steps = 10
+shift = 3.0
+jitter_scale = 0.02
+
+[lora]
+# 风格迁移建议 32-128
+network_dim = 64
+network_alpha = 32
+
+[style_loss]
+# 结构锁权重 (SSIM) - 锁死轮廓防止脸崩
+lambda_struct = 1.0
+
+# 光影学习权重 (L通道统计) - 学习大师的S曲线对比度
+lambda_light = 0.5
+
+# 色调迁移权重 (ab通道统计) - 学习冷暖调/胶片感
+lambda_color = 0.3
+
+# 质感增强权重 (高频L1) - 增强清晰度颗粒感
+lambda_tex = 0.5
+
+# 基础 v-prediction loss 权重
+lambda_base = 1.0
+
+[degradation]
+enable_degradation = true
+degradation_strength = "medium"
+
+[training]
+optimizer_type = "AdamW8bit"
+learning_rate = 5e-5
+weight_decay = 0.01
+lr_scheduler = "cosine"
+lr_warmup_steps = 100
+lr_num_cycles = 1
+num_train_epochs = 15
+save_every_n_epochs = 1
+gradient_accumulation_steps = 2
+seed = 42
+
+[advanced]
+max_grad_norm = 1.0
+gradient_checkpointing = true
+mixed_precision = "bf16"
+
+[dataset]
+batch_size = 1
+shuffle = true
+enable_bucket = true
+
+# 文本编码最大序列长度 (需与缓存时一致)
+max_sequence_length = 512
+
+[[dataset.sources]]
+cache_directory = "/path/to/your/masterpiece/dataset/cache"
+num_repeats = 10
+resolution_limit = 1024
+

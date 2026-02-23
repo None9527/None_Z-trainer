@@ -1,0 +1,174 @@
+# Z-Image AC-RF 训练超参数配置文件 (简化版)
+# ==========================================
+# 这是一个经过简化的配置文件，大部分底层参数已由 HardwareDetector 自动处理。
+# 适用于 scripts/train_acrf.py
+
+[model]
+# Transformer 模型路径 (必须是 .safetensors 或 diffusers 目录)
+dit = "/root/autodl-tmp/zimage-trainer/zimage_models/transformer"
+
+# 输出目录 (会自动创建)
+output_dir = "output/acrf_experiment_v1"
+
+[acrf]
+# Turbo 步数（锚点数量）
+# 推荐值: 10 (默认), 4 (快速实验), 20 (高质量)
+turbo_steps = 10
+
+# 时间步 Shift 参数 (仅 use_dynamic_shift=false 时使用)
+shift = 3.0
+
+# === Dynamic Shift (与 Pipeline 保持一致) ===
+# 启用后会根据分辨率自动计算 shift（推荐开启）
+use_dynamic_shift = true
+base_seq_len = 256   # 基准序列长度 (对应 512x512)
+max_seq_len = 4096   # 最大序列长度 (对应 2048x2048)
+base_shift = 0.5     # 最小 shift
+max_shift = 1.15     # 最大 shift
+
+# 锚点抖动幅度 (建议 0.01-0.05)
+# 用于"增厚"流形，防止过拟合于精确的锚点
+jitter_scale = 0.02
+
+# RAFT 混合模式（增强构图学习）
+# 同 batch 内混合锚点流和全时间步自由流
+raft_mode = false
+free_stream_ratio = 0.3  # 自由流比例 0.3=30%
+
+# Latent Jitter（构图突破 - 核心参数）
+# 在 x_t 上添加空间抖动，垂直于流线，真正改变构图的关键
+# ⚠️ 比 jitter_scale 更重要！推荐 0.03-0.05
+latent_jitter_scale = 0.0
+
+# Curvature Penalty（曲率惩罚 - 轨迹直化）
+# 鼓励相邻锚点间匀速直线运动，减少采样步数时的误差
+# 推荐：enable_curvature=true, lambda_curvature=0.05
+enable_curvature = false
+lambda_curvature = 0.05      # 惩罚权重 (0.01-0.1)
+curvature_interval = 10      # 每 N 步计算一次 (减少开销)
+curvature_start_epoch = 0    # 从第 N 个 epoch 开始启用
+
+# Drop Text（保持低 CFG 能力 - 关键参数）
+# 以一定概率丢弃文本条件，让模型学习无条件生成新风格
+# 这样 CFG=1 仍然可以正常出图，无需提高 CFG
+# 推荐 0.1 (10%)
+drop_text_ratio = 0.1
+
+# === CFG Training (Classifier-Free Guidance 训练) ===
+# 启用后会以一定概率使用 CFG 模式训练（正/负 prompt 对）
+# 让模型学习区分有条件和无条件生成，显著提升生成质量控制
+cfg_training = false
+cfg_scale = 7.0              # CFG 训练使用的 guidance scale
+cfg_training_ratio = 0.5     # CFG 模式占比 (0.5 = 50% 步数使用 CFG)
+
+[lora]
+# LoRA Rank (维度)
+# 建议: 8-16 (Turbo 模型不宜过大)
+network_dim = 16
+
+# LoRA Alpha (缩放系数)
+# 建议: network_dim / 2
+network_alpha = 16
+
+[training]
+# 优化器类型
+# 可选: "AdamW", "AdamW8bit", "Adafactor"
+# 推荐使用 "AdamW8bit" 以节省显存
+optimizer_type = "AdamW8bit"
+
+# 学习率
+learning_rate = 5e-5
+
+# 权重衰减
+weight_decay = 0.01
+
+# 学习率调度器
+# 可选: "constant", "linear", "cosine", "cosine_with_restarts", "constant_with_warmup"
+lr_scheduler = "cosine_with_restarts"
+lr_warmup_steps = 100
+lr_num_cycles = 1
+
+# Loss 权重配置
+# 基础损失 (必须)
+lambda_l1 = 1.0
+lambda_cosine = 0.1
+
+# 频域感知损失 (开关+权重+子参数)
+# 锐化细节纹理
+enable_freq = false
+lambda_freq = 0.3
+alpha_hf = 1.0
+beta_lf = 0.2
+
+# 风格结构损失 (开关+权重+子参数)
+# 学习光影色调
+enable_style = false
+lambda_style = 0.3
+lambda_struct = 1.0
+lambda_light = 0.5
+lambda_color = 0.3
+lambda_tex = 0.5
+
+# Min-SNR 加权 (减少不同时间步的 loss 波动)
+# 0 = 禁用, 推荐值 5.0
+snr_gamma = 5.0
+
+# 训练 Epoch 数
+num_train_epochs = 10
+
+# 保存间隔 (Epoch)
+save_every_n_epochs = 1
+
+# 梯度累积步数
+# 显存不足时可调大此值 (如 4 或 8)
+gradient_accumulation_steps = 4
+
+# 随机种子
+seed = 42
+
+[optimization]
+# 启用自动硬件优化 (核心开关)
+# 启用后，脚本会自动检测显卡型号 (Tier S/A/B) 并设置最佳的底层参数
+# 包括: 混合精度(BF16/FP16), Block Swap, SDPA, Worker数量等
+auto_optimize = true
+
+# 手动覆盖 (可选)
+# 如果自动检测不准确，可以在这里强制指定
+# gpu_tier = "tier_a"  # 可选: tier_s, tier_a, tier_b
+# gpu_memory_gb = 24   # 显存大小 (GB)
+
+[advanced]
+# 高级设置 (通常不需要修改，除非你明确知道自己在做什么)
+
+# 梯度裁剪阈值
+max_grad_norm = 1.0
+
+# 梯度检查点 (建议开启以节省显存)
+gradient_checkpointing = true
+
+# 混合精度
+mixed_precision = "bf16"
+
+# ============ Dataset 配置 ============
+[dataset]
+# 批次大小 (Batch Size)
+batch_size = 1
+
+# 是否打乱数据
+shuffle = true
+num_workers = 4
+
+# 文本编码最大序列长度
+max_sequence_length = 512
+
+# 缓存架构标识 (zi: Z-Image)
+cache_arch = "zi"
+
+# --- 数据集列表 ---
+[[dataset.sources]]
+# 缓存目录路径
+cache_directory = "/root/autodl-tmp/zimage-trainer/datasets/size_1024/size_1024"
+# 数据重复次数
+num_repeats = 10
+# 分辨率上限 (可选)
+resolution_limit = 1024

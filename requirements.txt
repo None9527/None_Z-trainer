@@ -1,0 +1,68 @@
+# ============================================================================
+# None Trainer v2 - Python Dependencies
+# ============================================================================
+#
+# PyTorch must be installed manually (match your CUDA version):
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+#
+# Flash Attention (optional, install pre-compiled whl):
+#   https://github.com/Dao-AILab/flash-attention/releases
+#
+# ============================================================================
+
+# Core
+numpy>=1.24.0
+Pillow>=10.0.0
+scipy>=1.10.0
+
+# PyTorch (manual install)
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# Diffusers & Transformers
+# diffusers: pip install git+https://github.com/huggingface/diffusers.git
+transformers>=4.40.0
+accelerate>=0.27.0
+safetensors>=0.4.0
+peft>=0.10.0
+protobuf>=3.20.0
+sentencepiece>=0.1.99
+
+# Optimizers
+bitsandbytes>=0.42.0
+prodigyopt>=1.0
+lion-pytorch>=0.1.0
+
+# Loss functions
+lpips>=0.1.4
+
+# Config
+toml>=0.10.0
+tomli>=2.0.0
+PyYAML>=6.0.0
+
+# Web UI & API
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+websockets>=12.0
+python-multipart>=0.0.6
+python-dotenv>=1.0.0
+aiofiles>=23.0.0
+
+# HTTP
+requests>=2.31.0
+httpx>=0.26.0
+
+# Model download
+modelscope>=1.10.0
+
+# Progress & Logging
+tqdm>=4.66.0
+rich>=13.0.0
+tensorboard>=2.15.0
+
+# Tools
+einops>=0.7.0
+packaging>=23.0

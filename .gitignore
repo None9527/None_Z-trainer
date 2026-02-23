@@ -1,0 +1,46 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Models & Data (too large for git)
+Z-Image/
+datasets/
+model-output/
+image-output/
+diffusers_src/
+
+# Environment
+.env
+start.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Configs (user-specific)
+configs/current_training.toml
+configs/audit_all_params.toml
+configs/*.json
+
+# Old duplicate folder
+None_Z-image-Turbo_trainer/
+
+# Gemini
+.gemini/
+
+# Misc
+*.whl
+z-trainer.log
+*.log
