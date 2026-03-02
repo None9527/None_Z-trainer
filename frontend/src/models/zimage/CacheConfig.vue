@@ -35,7 +35,21 @@
         <el-checkbox label="siglip" v-if="trainingMode === 'omni'">
           SigLIP 特征缓存
         </el-checkbox>
+        <el-checkbox label="dino">
+          DINOv3 感知缓存
+          <el-tooltip content="预缓存 DINOv3 语义特征，训练时可使用 DINOv3 感知 Loss" placement="top">
+            <el-icon class="help-icon" style="margin-left: 4px; font-size: 12px; cursor: help;"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </el-checkbox>
       </el-checkbox-group>
+    </el-form-item>
+    
+    <!-- DINOv3 模型路径 -->
+    <el-form-item label="DINOv3 模型" v-if="cacheTypes.includes('dino')">
+      <el-input v-model="dinoModelPath" placeholder="Dinov3 模型路径 (如 ./Dinov3-base)" />
+      <div class="cache-model-hint">
+        <span>缓存完成后训练中可启用 DINOv3 感知损失</span>
+      </div>
     </el-form-item>
     
     <!-- ControlNet 条件图目录 -->
@@ -82,6 +96,9 @@ const sourceDir = defineModel<string>('sourceDir', { default: '' })
 const maskDir = defineModel<string>('maskDir', { default: '' })
 const conditionDirs = defineModel<string>('conditionDirs', { default: '' })
 const numConditionImages = defineModel<number>('numConditionImages', { default: 1 })
+const dinoModelPath = defineModel<string>('dinoModelPath', { default: '' })
+
+import { QuestionFilled } from '@element-plus/icons-vue'
 
 function shortPath(path: string): string {
   return path.split(/[/\\]/).pop() || path

@@ -186,6 +186,13 @@ def parse_args(argv=None) -> SimpleNamespace:
         lambda_light=float(training.get("lambda_light", 0.5)),
         lambda_color=float(training.get("lambda_color", 0.3)),
 
+        enable_dino=bool(training.get("enable_dino", False)),
+        lambda_dino=float(training.get("lambda_dino", 0.1)),
+        dino_model=training.get("dino_model", "facebook/dinov3-vitb16-pretrain-lvd1689m"),
+        dino_image_size=int(training.get("dino_image_size", 512)),
+        dino_vae_path=training.get("dino_vae_path", ""),
+        dino_feature_mode=training.get("dino_feature_mode", "patch"),  # patch | cls | both
+
 
         # ── Dataset ──
         batch_size=int(dataset.get("batch_size", 1)),
@@ -340,6 +347,7 @@ def main(args: SimpleNamespace):
         if args.lambda_cosine > 0: active_losses.append(f"Cosine×{args.lambda_cosine}")
         if args.enable_freq and args.lambda_freq > 0: active_losses.append(f"Freq×{args.lambda_freq}")
         if args.enable_style and args.lambda_style > 0: active_losses.append(f"Style×{args.lambda_style}")
+        if args.enable_dino and args.lambda_dino > 0: active_losses.append(f"Dino×{args.lambda_dino}")
         if args.enable_timestep_aware_loss: active_losses.append("TimestepAware")
         if args.enable_curvature: active_losses.append(f"Curvature×{args.lambda_curvature}")
         if args.cfg_training: active_losses.append(f"CFG(s={args.cfg_scale})")
@@ -378,6 +386,7 @@ def main(args: SimpleNamespace):
     # ------------------------------------------------------------------
     freq_loss_fn = None
     style_loss_fn = None
+    dino_loss_fn = None
 
     if args.enable_freq and args.lambda_freq > 0:
         from shared.losses import FrequencyAwareLoss
@@ -392,6 +401,29 @@ def main(args: SimpleNamespace):
             lambda_light=args.lambda_light,
             lambda_color=args.lambda_color,
         )
+
+    if args.enable_dino and args.lambda_dino > 0:
+        from shared.losses import DinoPerceptualLoss
+        # Auto-derive VAE path from dit if not specified
+        _vae_path = args.dino_vae_path
+        if not _vae_path:
+            _vae_candidate = os.path.join(args.dit, "vae")
+            if os.path.isdir(_vae_candidate):
+                _vae_path = _vae_candidate
+                if accelerator.is_main_process:
+                    logger.info(f"[DinoLoss] Auto-detected VAE: {_vae_path}")
+            else:
+                raise ValueError(
+                    f"DINOv3 loss requires VAE but none found. "
+                    f"Set training.dino_vae_path or ensure {_vae_candidate} exists."
+                )
+        dino_loss_fn = DinoPerceptualLoss(
+            dino_model_path=args.dino_model,
+            vae_path=_vae_path,
+            dino_image_size=args.dino_image_size,
+            feature_mode=args.dino_feature_mode,
+        )
+        dino_loss_fn.to(device)
 
     # ------------------------------------------------------------------
     # 6. DataLoader
@@ -457,11 +489,13 @@ def main(args: SimpleNamespace):
         or args.lambda_cosine > 0
         or (args.enable_freq and args.lambda_freq > 0)
         or (args.enable_style and args.lambda_style > 0)
+        or (args.enable_dino and args.lambda_dino > 0)
     )
     if not has_loss:
         raise ValueError(
             "No loss function enabled! Set at least one of: "
-            "lambda_mse, lambda_l1, lambda_cosine, enable_freq+lambda_freq, enable_style+lambda_style"
+            "lambda_mse, lambda_l1, lambda_cosine, enable_freq+lambda_freq, "
+            "enable_style+lambda_style, enable_dino+lambda_dino"
         )
 
     # ------------------------------------------------------------------
@@ -758,6 +792,26 @@ def main(args: SimpleNamespace):
                     style_l = style_loss_fn(model_pred, target_velocity, z_t, sigmas * 1000.0, num_train_timesteps=1000)
                     loss = loss + args.lambda_style * style_l
                     loss_components["style"] = style_l.item()
+
+                # DINOv3 perceptual loss
+                if dino_loss_fn is not None and args.lambda_dino > 0:
+                    # Assemble cached embedding based on feature_mode
+                    cached_emb = None
+                    _mode = args.dino_feature_mode
+                    _patch = batch.get("dino_emb", None)
+                    _cls = batch.get("dino_cls", None)
+                    if _mode == "cls" and _cls is not None:
+                        cached_emb = _cls
+                    elif _mode == "both" and _cls is not None and _patch is not None:
+                        cached_emb = torch.cat([_cls, _patch], dim=-2)
+                    elif _patch is not None:
+                        cached_emb = _patch
+                    dino_l = dino_loss_fn(
+                        model_pred, target_velocity, z_t, sigmas * 1000.0,
+                        num_train_timesteps=1000, cached_dino_emb=cached_emb,
+                    )
+                    loss = loss + args.lambda_dino * dino_l
+                    loss_components["dino"] = dino_l.item()
 
                 # Timestep-aware loss weighting
                 if args.enable_timestep_aware_loss:

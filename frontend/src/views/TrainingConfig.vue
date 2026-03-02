@@ -722,6 +722,60 @@
               </div>
             </template>
 
+            <!-- DINOv3 感知 Loss -->
+            <div class="subsection-label">🧠 DINOv3 感知损失 (语义一致性)</div>
+            <div class="control-row">
+              <span class="label">
+                启用 DINOv3 Loss
+                <el-tooltip content="使用 DINOv3 ViT 提取语义特征，约束生成图与目标图的语义一致性。需预缓存 DINOv3 embedding" placement="top">
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </span>
+              <el-switch v-model="tc.config.value.training.enable_dino" />
+            </div>
+            <template v-if="tc.config.value.training.enable_dino">
+              <div class="control-row">
+                <span class="label">DINOv3 权重 (λ_dino)</span>
+                <el-slider v-model="tc.config.value.training.lambda_dino" :min="0.01" :max="1" :step="0.01" :show-tooltip="false" class="slider-flex" />
+                <el-input-number v-model="tc.config.value.training.lambda_dino" :min="0.01" :max="1" :step="0.01" controls-position="right" class="input-fixed" />
+              </div>
+              <div class="control-row">
+                <span class="label">
+                  特征模式
+                  <el-tooltip placement="top">
+                    <template #content>
+                      <div>patch: 逐区域对比（精确还原）</div>
+                      <div>cls: 全局语义对比（风格/美学）</div>
+                      <div>both: 两者结合</div>
+                    </template>
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+                <el-select v-model="tc.config.value.training.dino_feature_mode" style="width: 180px">
+                  <el-option label="Patch (逐区域)" value="patch" />
+                  <el-option label="CLS (全局美学)" value="cls" />
+                  <el-option label="Both (组合)" value="both" />
+                </el-select>
+              </div>
+              <div class="form-row-full">
+                <label>
+                  DINOv3 模型路径
+                  <el-tooltip content="DINOv3 ViT 模型路径，如 ./Dinov3-base" placement="top">
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </label>
+                <el-input v-model="tc.config.value.training.dino_model" placeholder="./Dinov3-base 或 HuggingFace ID" />
+              </div>
+              <div class="control-row">
+                <span class="label">DINOv3 分辨率</span>
+                <el-select v-model="tc.config.value.training.dino_image_size" style="width: 180px">
+                  <el-option label="224 (最轻量)" :value="224" />
+                  <el-option label="384" :value="384" />
+                  <el-option label="512 (推荐)" :value="512" />
+                </el-select>
+              </div>
+            </template>
+
             <!-- REPA -->
             <div class="subsection-label">时间步感知 (REPA)</div>
             <div class="control-row">

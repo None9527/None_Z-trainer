@@ -113,7 +113,12 @@ export function useTrainingConfig() {
                 enable_style: false,
                 lambda_style: 0.3,
                 lambda_light: 0.5,
-                lambda_color: 0.3
+                lambda_color: 0.3,
+                enable_dino: false,
+                lambda_dino: 0.1,
+                dino_model: '',
+                dino_image_size: 512,
+                dino_feature_mode: 'patch',
             },
             dataset: {
                 batch_size: 1,

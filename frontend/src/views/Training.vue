@@ -300,6 +300,21 @@ const previewSchema: PreviewSection[] = [
     ]
   },
   {
+    title: 'DINOv3 感知',
+    showIf: (c) => c.training_type !== 'controlnet',
+    params: [
+      { label: 'DINOv3 Loss', path: 'training.enable_dino', format: 'boolean', highlight: true },
+      { label: 'λ DINOv3', path: 'training.lambda_dino', defaultValue: 0.1,
+        showIf: (c) => c.training?.enable_dino },
+      { label: '特征模式', path: 'training.dino_feature_mode', format: 'custom', 
+        showIf: (c) => c.training?.enable_dino,
+        valueFormatter: (v) => ({ patch: 'Patch (逐区域)', cls: 'CLS (全局美学)', both: 'Both (组合)' }[v as string] || v) },
+      { label: 'DINOv3 模型', path: 'training.dino_model', format: 'custom',
+        showIf: (c) => c.training?.enable_dino,
+        valueFormatter: (v) => v ? (v as string).split(/[/\\]/).pop() || v : '未配置' },
+    ]
+  },
+  {
     title: 'Timestep-Aware / RAFT',
     showIf: (c) => c.training_type !== 'controlnet',
     params: [

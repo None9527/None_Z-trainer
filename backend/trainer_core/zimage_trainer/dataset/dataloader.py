@@ -172,10 +172,21 @@ class ZImageLatentDataset(Dataset):
             pad_len = self.max_sequence_length - seq_len
             vl_embed = torch.nn.functional.pad(vl_embed, (0, 0, 0, pad_len), mode='constant', value=0)
         
-        return {
+        result = {
             'latents': latents,
             'vl_embed': vl_embed,
         }
+        
+        # Load cached DINOv3 embeddings if available
+        dino_path = latent_path.with_suffix(".dino.safetensors")
+        if dino_path.exists():
+            dino_data = load_file(str(dino_path))
+            if "dino_emb" in dino_data:
+                result["dino_emb"] = dino_data["dino_emb"]   # (P, D)
+            if "dino_cls" in dino_data:
+                result["dino_cls"] = dino_data["dino_cls"]   # (1, D)
+        
+        return result
 
 
 class ControlNetDataset(Dataset):
