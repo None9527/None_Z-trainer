@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FastAPI Application Entry Point (v2)
+FastAPI Application Entry Point
 
 Assembles all DDD layers:
 - Interface routers (training, dataset, generation, system, websocket)
@@ -29,13 +29,13 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
-    logger.info("Z-Image Trainer v2 starting...")
+    logger.info("Z-Image Trainer starting...")
     yield
-    logger.info("Z-Image Trainer v2 shutting down...")
+    logger.info("Z-Image Trainer shutting down...")
 
 
 app = FastAPI(
-    title="Z-Image Trainer v2",
+    title="Z-Image Trainer",
     version="2.0.0",
     description="DDD-based training management API",
     lifespan=lifespan,
@@ -57,6 +57,7 @@ from .generation_router import router as generation_router
 from .system_router import router as system_router
 from .cache_router import router as cache_router
 from .websocket_manager import router as ws_router
+from .skill_router import router as skill_router
 
 app.include_router(training_router)
 app.include_router(dataset_router)
@@ -64,6 +65,7 @@ app.include_router(generation_router)
 app.include_router(system_router)
 app.include_router(cache_router)
 app.include_router(ws_router)
+app.include_router(skill_router)
 
 
 # --- Health Check ---

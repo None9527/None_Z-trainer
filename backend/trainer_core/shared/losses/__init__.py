@@ -18,6 +18,7 @@ Available losses:
 - LatentStyleStructureLoss: Latent-space approximation (saves VRAM)
 - DPOLoss: Direct Preference Optimization
 - DPOLossWithSNR: DPO with SNR weighting
+- DinoPerceptualLoss: DINOv3 ViT patch-level semantic similarity
 """
 
 from .standard_loss import StandardLoss, compute_standard_loss
@@ -33,6 +34,7 @@ from .mse_loss import (
 from .frequency_aware_loss import FrequencyAwareLoss, AdaptiveFrequencyLoss
 from .style_structure_loss import StyleStructureLoss, LatentStyleStructureLoss
 from .dpo_loss import DPOLoss, DPOLossWithSNR
+from .dino_perceptual_loss import DinoPerceptualLoss
 
 __all__ = [
     # Standard (recommended)
@@ -55,4 +57,7 @@ __all__ = [
     # DPO
     "DPOLoss",
     "DPOLossWithSNR",
+    # DINOv3 perceptual
+    "DinoPerceptualLoss",
 ]
+

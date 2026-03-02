@@ -85,13 +85,13 @@
                 </div>
                 <div class="control-row">
                   <span class="label">宽度</span>
-                  <el-slider v-model="params.width" :min="256" :max="2048" :step="64" :marks="resolutionMarks" :show-tooltip="false" class="slider-flex" />
-                  <el-input-number v-model="params.width" :min="256" :max="2048" :step="64" controls-position="right" class="input-fixed" />
+                  <el-slider v-model="params.width" :min="256" :max="2048" :step="16" :marks="resolutionMarks" :show-tooltip="false" class="slider-flex" />
+                  <el-input-number v-model="params.width" :min="256" :max="2048" :step="16" controls-position="right" class="input-fixed" />
                 </div>
                 <div class="control-row">
                   <span class="label">高度</span>
-                  <el-slider v-model="params.height" :min="256" :max="2048" :step="64" :marks="resolutionMarks" :show-tooltip="false" class="slider-flex" />
-                  <el-input-number v-model="params.height" :min="256" :max="2048" :step="64" controls-position="right" class="input-fixed" />
+                  <el-slider v-model="params.height" :min="256" :max="2048" :step="16" :marks="resolutionMarks" :show-tooltip="false" class="slider-flex" />
+                  <el-input-number v-model="params.height" :min="256" :max="2048" :step="16" controls-position="right" class="input-fixed" />
                 </div>
               </div>
 

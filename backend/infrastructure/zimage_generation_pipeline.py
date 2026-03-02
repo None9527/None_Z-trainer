@@ -317,6 +317,10 @@ class ZImageGenerationPipeline(IGenerationPipeline):
                 progress_callback(step_index + 1, total_steps)
             return callback_kwargs
 
+        # Align dimensions to 16px (VAE/diffusers requirement)
+        req_width = max(16, round(request.width / 16) * 16)
+        req_height = max(16, round(request.height / 16) * 16)
+
         results: List[GenerationResult] = []
         for i in range(request.num_images):
             img_seed = seed + i
@@ -326,8 +330,8 @@ class ZImageGenerationPipeline(IGenerationPipeline):
             pipe_kwargs = dict(
                 prompt=request.prompt,
                 negative_prompt=request.negative_prompt or None,
-                width=request.width,
-                height=request.height,
+                width=req_width,
+                height=req_height,
                 num_inference_steps=total_steps,
                 guidance_scale=request.guidance_scale,
                 generator=gen,
@@ -349,8 +353,8 @@ class ZImageGenerationPipeline(IGenerationPipeline):
                 image_path=str(save_path),
                 prompt=request.prompt,
                 seed=img_seed,
-                width=request.width,
-                height=request.height,
+                width=req_width,
+                height=req_height,
                 steps=total_steps,
                 guidance_scale=request.guidance_scale,
                 lora_path=request.lora_path,

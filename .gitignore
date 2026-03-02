@@ -12,10 +12,16 @@ frontend/dist/
 
 # Models & Data (too large for git)
 Z-Image/
+Dinov3-base/
+qwen3vl-4b/
 datasets/
 model-output/
 image-output/
 diffusers_src/
+agentscope_review/
+*.safetensors
+*.bin
+*.gguf
 
 # Environment
 .env
@@ -44,3 +50,9 @@ None_Z-image-Turbo_trainer/
 *.whl
 z-trainer.log
 *.log
+
+# Test outputs
+test_outputs/
+zimage_test_output/
+test_qwen3vl_inference.py
+zimage_batch_inference.py
