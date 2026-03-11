@@ -235,6 +235,42 @@
         </div>
       </div>
 
+      <!-- DINOv3 模型状态 -->
+      <div class="status-card dino-card">
+        <div class="card-header">
+          <el-icon><Cpu /></el-icon>
+          <span>DINOv3 感知模型</span>
+          <el-tag
+            :type="dinoStatus.status === 'ready' ? 'success' : dinoStatus.status === 'incomplete' ? 'warning' : 'danger'"
+            size="small" effect="dark"
+          >
+            {{ dinoStatus.status === 'ready' ? '就绪' : dinoStatus.status === 'incomplete' ? '不完整' : '未配置' }}
+          </el-tag>
+        </div>
+        <div class="status-list" v-if="dinoStatus.path">
+          <div class="status-row">
+            <span class="label">配置路径</span>
+            <code class="value path-code" :title="dinoStatus.path">{{ dinoStatus.path }}</code>
+          </div>
+          <div class="status-row" v-if="dinoStatus.status === 'ready'">
+            <span class="label">config.json</span>
+            <span class="value" style="color: var(--el-color-success)">✓</span>
+          </div>
+          <div class="status-row" v-if="dinoStatus.status === 'ready'">
+            <span class="label">模型权重</span>
+            <span class="value" style="color: var(--el-color-success)">✓</span>
+          </div>
+        </div>
+        <div v-if="dinoStatus.status !== 'ready'" class="model-unchecked" style="margin-top: 8px">
+          <el-icon><WarningFilled /></el-icon>
+          <span>{{ dinoStatus.message || '请在 .env 中配置 DINO_MODEL_PATH' }}</span>
+        </div>
+        <div v-if="loadingDino" class="loading-state">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span>检测中...</span>
+        </div>
+      </div>
+
       <!-- 联系方式 -->
       <div class="contact-card">
         <div class="contact-row" @click="copyEmail('lihaonan1082@gmail.com')">
@@ -260,7 +296,7 @@ import { useWebSocketStore } from '@/stores/websocket'
 import { 
   Picture, Setting, VideoPlay, Monitor,
   CircleCheck, Close, Loading, Box,
-  ArrowRight, MagicStick, Download, CopyDocument, WarningFilled
+  ArrowRight, MagicStick, Download, CopyDocument, WarningFilled, Cpu
 } from '@element-plus/icons-vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
@@ -276,6 +312,12 @@ const modelTypes = ref([
 
 const selectedModelType = ref('zimage')
 const loadingModel = ref(false)
+const loadingDino = ref(false)
+
+// DINOv3 status
+const dinoStatus = ref<{ status: string, path: string, message: string }>({
+  status: 'missing', path: '', message: ''
+})
 
 // 每个模型的状态
 const modelStatusMap = ref<Record<string, any>>({
@@ -434,6 +476,21 @@ function copyEmail(email: string) {
 }
 
 refreshModelStatus()
+refreshDinoStatus()
+
+async function refreshDinoStatus() {
+  loadingDino.value = true
+  try {
+    const res = await axios.get('/api/system/dino/status')
+    if (res.data.success && res.data.data) {
+      dinoStatus.value = res.data.data
+    }
+  } catch (e) {
+    console.error('Failed to check DINOv3 status:', e)
+  } finally {
+    loadingDino.value = false
+  }
+}
 </script>
 
 <style scoped>

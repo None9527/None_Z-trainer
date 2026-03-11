@@ -124,12 +124,13 @@ TRAINER_PORT=28000
 
 ```
 Z-Image/
-├── transformer/           # Transformer 权重
+├── transformer/           # ZImageTransformer2DModel 权重
 │   ├── config.json
 │   └── *.safetensors
-├── vae/                   # VAE
-├── text_encoder/          # Text Encoder
-├── text_encoder_2/        # Text Encoder 2
+├── vae/                   # AutoencoderKL
+├── text_encoder/          # Qwen3Model (文本编码器)
+├── tokenizer/             # Qwen2Tokenizer (分词器)
+├── scheduler/             # FlowMatchEulerDiscreteScheduler
 └── model_index.json
 ```
 

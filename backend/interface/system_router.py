@@ -143,3 +143,53 @@ async def get_download_progress():
             "error_message": progress.error_message,
         },
     )
+
+
+@router.get("/dino/status", response_model=ApiResponse)
+async def get_dino_model_status():
+    """Check DINOv3 model availability from DINO_MODEL_PATH env."""
+    from pathlib import Path
+    from ..infrastructure.config import DINO_MODEL_PATH
+
+    path = DINO_MODEL_PATH
+    path_str = str(path) if path else ""
+
+    if not path or not path.exists():
+        return ApiResponse(
+            success=True,
+            data={
+                "status": "missing",
+                "path": path_str,
+                "message": "DINOv3 模型目录不存在，请在 .env 中配置 DINO_MODEL_PATH",
+            },
+        )
+
+    # Check for valid model files
+    has_config = (path / "config.json").exists()
+    has_weights = (
+        (path / "model.safetensors").exists()
+        or (path / "pytorch_model.bin").exists()
+        or any(path.glob("*.safetensors"))
+    )
+
+    if has_config and has_weights:
+        status = "ready"
+        message = "DINOv3 模型就绪"
+    elif has_config or has_weights:
+        status = "incomplete"
+        message = "DINOv3 模型文件不完整"
+    else:
+        status = "empty"
+        message = "DINOv3 目录为空，缺少模型文件"
+
+    return ApiResponse(
+        success=True,
+        data={
+            "status": status,
+            "path": path_str,
+            "has_config": has_config,
+            "has_weights": has_weights,
+            "message": message,
+        },
+    )
+

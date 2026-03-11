@@ -760,11 +760,11 @@
               <div class="form-row-full">
                 <label>
                   DINOv3 模型路径
-                  <el-tooltip content="DINOv3 ViT 模型路径，如 ./Dinov3-base" placement="top">
+                  <el-tooltip content="由 .env 中 DINO_MODEL_PATH 统一配置" placement="top">
                     <el-icon class="help-icon"><QuestionFilled /></el-icon>
                   </el-tooltip>
                 </label>
-                <el-input v-model="tc.config.value.training.dino_model" placeholder="./Dinov3-base 或 HuggingFace ID" />
+                <el-input :model-value="tc.config.value.training.dino_model || '(由 .env DINO_MODEL_PATH 配置)'" readonly disabled />
               </div>
               <div class="control-row">
                 <span class="label">DINOv3 分辨率</span>

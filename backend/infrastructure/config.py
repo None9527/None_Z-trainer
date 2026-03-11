@@ -39,6 +39,9 @@ VAE_PATH = _resolve_path("VAE_PATH", "") or MODEL_PATH / "vae"
 TEXT_ENCODER_PATH = _resolve_path("TEXT_ENCODER_PATH", "") or MODEL_PATH / "text_encoder"
 TRANSFORMER_PATH = _resolve_path("TRANSFORMER_PATH", "") or MODEL_PATH / "transformer"
 
+# --- DINOv3 Model ---
+DINO_MODEL_PATH = _resolve_path("DINO_MODEL_PATH", "Dinov3-base")
+
 # --- Output sub-paths ---
 LORA_PATH = _resolve_path("LORA_PATH", "") or (OUTPUT_PATH / "lora")
 FINETUNE_PATH = _resolve_path("FINETUNE_PATH", "") or (OUTPUT_PATH / "finetune")

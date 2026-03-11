@@ -42,6 +42,7 @@ class CacheGenerateRequest(BaseModel):
     modelType: str = "zimage"
     generateLatent: bool = True
     generateText: bool = True
+    generateDino: bool = False
     resolution: int = 1024
     skipExisting: bool = True
     mode: str = "text2img"           # text2img | controlnet | img2img | inpaint | omni
@@ -174,6 +175,7 @@ def _run_cache_subprocess(
     mask_dir: Optional[str] = None,
     condition_dirs: Optional[str] = None,
     num_condition_images: int = 0,
+    generate_dino: bool = False,
 ):
     """Run cache generation in a background thread using subprocess."""
     global _cache_state
@@ -269,6 +271,24 @@ def _run_cache_subprocess(
                 if skip_existing:
                     cmd.append("--skip_existing")
                 _run_phase(cmd, _cache_state.text, env, cwd=str(trainer_core))
+
+        # Phase 4: DINOv3 embedding cache
+        if generate_dino and not _cache_state._cancelled:
+            from ..infrastructure.config import DINO_MODEL_PATH
+            dino_path = str(DINO_MODEL_PATH)
+            if Path(dino_path).exists():
+                logger.info(f"Starting DINOv3 cache: model={dino_path}, dir={dataset_path}")
+                cmd = [
+                    sys.executable, "-m", "zimage_trainer.cache_dino_embeddings",
+                    "--dino_model", dino_path,
+                    "--input_dir", dataset_path,
+                    "--output_dir", dataset_path,
+                ]
+                if skip_existing:
+                    cmd.append("--skip_existing")
+                _run_phase(cmd, _cache_state.text, env, cwd=str(trainer_core))
+            else:
+                logger.warning(f"DINOv3 cache skipped: model not found at {dino_path}")
 
     except Exception as e:
         logger.error(f"Cache generation error: {e}")
@@ -374,6 +394,7 @@ async def generate_cache(request: CacheGenerateRequest):
             request.maskDir,
             request.conditionDirs,
             request.numConditionImages,
+            request.generateDino,
         ),
         daemon=True,
     )

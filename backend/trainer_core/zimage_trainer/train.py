@@ -188,7 +188,7 @@ def parse_args(argv=None) -> SimpleNamespace:
 
         enable_dino=bool(training.get("enable_dino", False)),
         lambda_dino=float(training.get("lambda_dino", 0.1)),
-        dino_model=training.get("dino_model", "facebook/dinov3-vitb16-pretrain-lvd1689m"),
+        dino_model=os.getenv("DINO_MODEL_PATH", "").strip() or training.get("dino_model", "facebook/dinov3-vitb16-pretrain-lvd1689m"),
         dino_image_size=int(training.get("dino_image_size", 512)),
         dino_vae_path=training.get("dino_vae_path", ""),
         dino_feature_mode=training.get("dino_feature_mode", "patch"),  # patch | cls | both

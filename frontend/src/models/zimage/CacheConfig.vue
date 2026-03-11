@@ -44,11 +44,17 @@
       </el-checkbox-group>
     </el-form-item>
     
-    <!-- DINOv3 模型路径 -->
+    <!-- DINOv3 模型路径 (只读，由 .env 配置) -->
     <el-form-item label="DINOv3 模型" v-if="cacheTypes.includes('dino')">
-      <el-input v-model="dinoModelPath" placeholder="Dinov3 模型路径 (如 ./Dinov3-base)" />
+      <div class="dino-env-status">
+        <el-tag :type="dinoReady ? 'success' : 'warning'" size="small" effect="plain">
+          {{ dinoReady ? '就绪' : '未就绪' }}
+        </el-tag>
+        <code class="dino-path" v-if="dinoPath">{{ dinoPath }}</code>
+        <span class="cache-path-missing" v-else>未配置 DINO_MODEL_PATH</span>
+      </div>
       <div class="cache-model-hint">
-        <span>缓存完成后训练中可启用 DINOv3 感知损失</span>
+        <span>模型路径由 .env 中 DINO_MODEL_PATH 配置</span>
       </div>
     </el-form-item>
     
@@ -81,7 +87,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, onMounted } from 'vue'
+import axios from 'axios'
 
 const props = defineProps<{
   datasetPath: string
@@ -100,7 +107,45 @@ const dinoModelPath = defineModel<string>('dinoModelPath', { default: '' })
 
 import { QuestionFilled } from '@element-plus/icons-vue'
 
+// DINOv3 env status
+const dinoReady = ref(false)
+const dinoPath = ref('')
+
+async function fetchDinoStatus() {
+  try {
+    const res = await axios.get('/api/system/dino/status')
+    if (res.data.success && res.data.data) {
+      const d = res.data.data
+      dinoReady.value = d.status === 'ready'
+      dinoPath.value = d.path || ''
+      // Sync to parent model so cache generation knows the path
+      dinoModelPath.value = d.path || ''
+    }
+  } catch { }
+}
+
+onMounted(fetchDinoStatus)
+
 function shortPath(path: string): string {
   return path.split(/[/\\]/).pop() || path
 }
 </script>
+
+<style scoped>
+.dino-env-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dino-path {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  padding: 2px 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 400px;
+}
+</style>
