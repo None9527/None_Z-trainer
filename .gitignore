@@ -65,3 +65,12 @@ compare_encoders.log
 gen_bench_prompts.py
 descriptions_ark.jsonl
 zimage_bench.jsonl
+
+# Local deployment & temp
+.msc
+nohup.out
+pm2_start.sh
+cache_atmo.sh
+config/dataset_atmo.toml
+config/train_atmo.toml
+1

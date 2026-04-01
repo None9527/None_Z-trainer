@@ -80,6 +80,15 @@ export interface LocalDataset {
   channels?: ChannelInfo[]
 }
 
+// 文件夹项（组织目录）
+export interface FolderItem {
+  name: string
+  subpath: string
+  childCount: number
+  hasImages?: boolean
+  imageCount?: number
+}
+
 export const useDatasetStore = defineStore('dataset', () => {
   // ============================================================================
   // 状态
@@ -92,6 +101,11 @@ export const useDatasetStore = defineStore('dataset', () => {
   // 本地数据集列表（用于替代组件中的 localDatasets）
   const localDatasets = ref<LocalDataset[]>([])
   const datasetsDir = ref('')
+
+  // 子文件夹浏览状态
+  const currentSubpath = ref('')
+  const breadcrumb = ref<string[]>([])
+  const subfolders = ref<FolderItem[]>([])
 
   // 分页状态
   const currentPage = ref(1)
@@ -127,6 +141,42 @@ export const useDatasetStore = defineStore('dataset', () => {
       return response.data
     } catch (error) {
       console.error('Failed to fetch datasets:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 浏览指定子路径下的文件夹和数据集
+   */
+  async function browseFolder(subpath: string = '') {
+    try {
+      const response = await axios.get('/api/dataset/browse', { params: { subpath } })
+      const data = response.data
+      subfolders.value = data.folders || []
+      localDatasets.value = data.datasets || []
+      currentSubpath.value = data.subpath || ''
+      breadcrumb.value = data.breadcrumb || []
+      datasetsDir.value = data.datasetsDir || ''
+      return data
+    } catch (error) {
+      console.error('Failed to browse folder:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 创建组织文件夹
+   */
+  async function createFolder(name: string) {
+    try {
+      const formData = new FormData()
+      formData.append('name', name)
+      formData.append('parent_path', currentSubpath.value)
+      await axios.post('/api/dataset/create-folder', formData)
+      // 刷新当前层级
+      await browseFolder(currentSubpath.value)
+    } catch (error: any) {
+      console.error('Failed to create folder:', error)
       throw error
     }
   }
@@ -411,6 +461,10 @@ export const useDatasetStore = defineStore('dataset', () => {
     // 本地数据集列表
     localDatasets,
     datasetsDir,
+    // 子文件夹浏览
+    currentSubpath,
+    breadcrumb,
+    subfolders,
     // 分页相关
     currentPage,
     pageSize,
@@ -423,6 +477,8 @@ export const useDatasetStore = defineStore('dataset', () => {
     fetchStats,
     // 方法
     fetchDatasets,
+    browseFolder,
+    createFolder,
     clearCurrentDataset,
     scanDataset,
     scanChannels,

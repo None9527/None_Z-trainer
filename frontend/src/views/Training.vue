@@ -51,11 +51,15 @@
       </div>
       <div class="info-card glass-card">
         <div class="card-label">已用时间</div>
-        <div class="card-value">{{ formatTime(progress.elapsedTime) }}</div>
+        <div class="card-value">{{ formatDuration(progress.elapsedTime) }}</div>
       </div>
       <div class="info-card glass-card">
         <div class="card-label">预计剩余</div>
-        <div class="card-value">{{ formatTime(progress.estimatedTimeRemaining) }}</div>
+        <div class="card-value">{{ formatDuration(progress.estimatedTimeRemaining) }}</div>
+      </div>
+      <div class="info-card glass-card">
+        <div class="card-label">预计结束</div>
+        <div class="card-value">{{ formatEndTime(progress.estimatedTimeRemaining) }}</div>
       </div>
     </div>
 
@@ -235,8 +239,8 @@ const previewSchema: PreviewSection[] = [
       { label: 'Network Alpha', path: 'network.alpha', defaultValue: 4 },
       { label: '继续训练', path: 'lora.resume_training', format: 'boolean' },
       { label: 'Train AdaLN', path: 'lora.train_adaln', format: 'boolean' },
-      { label: 'Train Norm', path: 'lora.train_norm', format: 'boolean' },
-      { label: 'Single Stream', path: 'lora.train_single_stream', format: 'boolean' },
+      { label: 'Train Refiner', path: 'lora.train_refiner', format: 'boolean' },
+      { label: 'STE Tanh', path: 'lora.enable_ste_tanh', format: 'boolean' },
     ]
   },
   {
@@ -265,6 +269,8 @@ const previewSchema: PreviewSection[] = [
       { label: 'Warmup Steps', path: 'training.lr_warmup_steps', defaultValue: 0 },
       { label: 'Num Cycles', path: 'training.lr_num_cycles', defaultValue: 1,
         showIf: (c) => c.training?.lr_scheduler === 'cosine_with_restarts' },
+      { label: 'Loss 加权', path: 'acrf.loss_weighting', format: 'custom', highlight: true,
+        valueFormatter: (v) => ({ none: '无', gaussian: 'Gaussian (BSMNTW)' }[v as string] || v || '无') },
       { label: 'Lambda MSE (L2)', path: 'training.lambda_mse', defaultValue: 1.0 },
       { label: 'Lambda L1', path: 'training.lambda_l1', defaultValue: 1.0 },
       { label: 'Lambda Cosine', path: 'training.lambda_cosine', defaultValue: 0.1 },
@@ -300,18 +306,12 @@ const previewSchema: PreviewSection[] = [
     ]
   },
   {
-    title: 'DINOv3 感知',
+    title: 'DINOv3 语义引导',
     showIf: (c) => c.training_type !== 'controlnet',
     params: [
-      { label: 'DINOv3 Loss', path: 'training.enable_dino', format: 'boolean', highlight: true },
-      { label: 'λ DINOv3', path: 'training.lambda_dino', defaultValue: 0.1,
-        showIf: (c) => c.training?.enable_dino },
-      { label: '特征模式', path: 'training.dino_feature_mode', format: 'custom', 
-        showIf: (c) => c.training?.enable_dino,
-        valueFormatter: (v) => ({ patch: 'Patch (逐区域)', cls: 'CLS (全局美学)', both: 'Both (组合)' }[v as string] || v) },
-      { label: 'DINOv3 模型', path: 'training.dino_model', format: 'custom',
-        showIf: (c) => c.training?.enable_dino,
-        valueFormatter: (v) => v ? (v as string).split(/[/\\]/).pop() || v : '未配置' },
+      { label: 'DINOv3 引导', path: 'training.enable_dino_mask', format: 'boolean', highlight: true },
+      { label: '背景保留比', path: 'training.dino_mask_base_ratio', defaultValue: 0.2,
+        showIf: (c) => c.training?.enable_dino_mask },
     ]
   },
   {
@@ -450,12 +450,22 @@ function getModelTypeLabel(type: string | undefined): string {
 }
 
 
-function formatTime(seconds: number): string {
-  if (seconds <= 0) return '--:--:--'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+function formatDuration(seconds: number): string {
+  if (seconds <= 0) return '--'
+  if (seconds < 60) return `${Math.floor(seconds)}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}min`
+  const hours = seconds / 3600
+  return hours >= 10 ? `${Math.round(hours)}h` : `${hours.toFixed(1)}h`
+}
+
+function formatEndTime(remainingSeconds: number): string {
+  if (remainingSeconds <= 0) return '--'
+  const end = new Date(Date.now() + remainingSeconds * 1000)
+  const month = end.getMonth() + 1
+  const day = end.getDate()
+  const hour = end.getHours().toString().padStart(2, '0')
+  const min = end.getMinutes().toString().padStart(2, '0')
+  return `${month}/${day} ${hour}:${min}`
 }
 
 function addLog(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') {

@@ -283,6 +283,32 @@ async def list_datasets():
     })
 
 
+@router.get("/browse")
+async def browse_datasets(subpath: str = ""):
+    """Browse datasets directory at a given subpath level.
+
+    Returns folders (organizational dirs) and datasets (dirs with images)
+    at the specified subpath level, enabling hierarchical navigation.
+    """
+    repo = _get_repo()
+    result = repo.browse(subpath)
+    result["datasetsDir"] = str(repo._dataset_path)
+    return result
+
+
+@router.post("/create-folder")
+async def create_folder(name: str = Form(...), parent_path: str = Form("")):
+    """Create an organizational folder within datasets directory."""
+    repo = _get_repo()
+    try:
+        folder = repo.create_folder(name, parent_path)
+        return {"success": True, "name": name.strip(), "path": str(folder)}
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/cached")
 async def list_cached_datasets():
     """List datasets for training config selector (simplified format)."""
@@ -296,10 +322,21 @@ async def list_cached_datasets():
 
 
 @router.post("/create")
-async def create_dataset(name: str = Form(...)):
-    """Create a new empty dataset directory."""
+async def create_dataset(name: str = Form(...), parent_path: str = Form("")):
+    """Create a new empty dataset directory.
+
+    Args:
+        name: Dataset name
+        parent_path: Optional subpath within datasets dir (e.g. "人物" to create under datasets/人物/)
+    """
     base = _get_dataset_path()
-    dataset_dir = base / name.strip()
+    parent = base / parent_path if parent_path else base
+    # Safety: ensure parent doesn't escape base
+    try:
+        parent.resolve().relative_to(base.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="路径越界")
+    dataset_dir = parent / name.strip()
     if dataset_dir.exists():
         raise HTTPException(status_code=400, detail=f"数据集「{name}」已存在")
     try:
@@ -309,13 +346,16 @@ async def create_dataset(name: str = Form(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{name}")
+@router.delete("/{name:path}")
 async def delete_dataset(name: str):
-    """Delete a dataset directory."""
+    """Delete a dataset or folder directory.
+
+    Supports nested paths like '人物/角色A' via {name:path}.
+    """
     base = _get_dataset_path()
     dataset_dir = base / name
     if not dataset_dir.exists():
-        raise HTTPException(status_code=404, detail=f"数据集「{name}」不存在")
+        raise HTTPException(status_code=404, detail=f"「{name}」不存在")
     if not dataset_dir.is_dir():
         raise HTTPException(status_code=400, detail=f"「{name}」不是目录")
     # Safety: only allow deleting within dataset base path
@@ -325,7 +365,7 @@ async def delete_dataset(name: str):
         raise HTTPException(status_code=403, detail="路径越界")
     try:
         shutil.rmtree(dataset_dir)
-        return {"success": True, "message": f"数据集「{name}」已删除"}
+        return {"success": True, "message": f"「{name}」已删除"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

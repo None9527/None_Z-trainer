@@ -94,7 +94,27 @@
           <el-checkbox label="siglip" v-if="config.trainingMode === 'omni'">
             SigLIP 特征缓存
           </el-checkbox>
+          
+          <!-- DINOv3 感知缓存 (所有模式可用) -->
+          <el-checkbox label="dino">
+            DINOv3 感知缓存
+            <el-tooltip content="预缓存 DINOv3 语义特征，训练时可使用 DINOv3 感知 Loss" placement="top">
+              <el-icon class="help-icon" style="margin-left: 4px; font-size: 12px; cursor: help;"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </el-checkbox>
         </el-checkbox-group>
+      </el-form-item>
+      
+      <!-- DINOv3 模型状态 -->
+      <el-form-item label="DINOv3 模型" v-if="config.options.includes('dino')">
+        <div v-if="dinoReady" class="model-valid">
+          <el-icon color="#67c23a"><CircleCheckFilled /></el-icon>
+          <span>{{ dinoPath }}</span>
+        </div>
+        <div v-else class="model-invalid">
+          <el-icon color="#f56c6c"><WarningFilled /></el-icon>
+          <span>未配置 DINO_MODEL_PATH (.env)</span>
+        </div>
       </el-form-item>
       
       <!-- ControlNet 条件图目录 -->
@@ -146,7 +166,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { InfoFilled, WarningFilled, CircleCheckFilled, Loading } from '@element-plus/icons-vue'
+import { InfoFilled, WarningFilled, CircleCheckFilled, Loading, QuestionFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 // Props
@@ -163,6 +183,7 @@ const emit = defineEmits<{
     trainingMode: string
     options: string[]
     modelPath: string
+    dinoModelPath?: string
     controlDir?: string
     sourceDir?: string
     maskDir?: string
@@ -200,6 +221,7 @@ watch(() => props.modelValue, (val) => {
   if (val) {
     fetchModelStatus()
     fetchGpuInfo()
+    fetchDinoStatus()
   }
 })
 
@@ -242,9 +264,24 @@ const canGenerate = computed(() => {
   return config.value.options.length > 0 && modelStatus.value === 'valid'
 })
 
+// DINOv3 模型状态
+const dinoReady = ref(false)
+const dinoPath = ref('')
+
+async function fetchDinoStatus() {
+  try {
+    const res = await axios.get('/api/system/dino/status')
+    if (res.data.success && res.data.data) {
+      const d = res.data.data
+      dinoReady.value = d.status === 'ready'
+      dinoPath.value = d.path || ''
+    }
+  } catch { }
+}
+
 // 确认生成
 function handleConfirm() {
-  emit('confirm', { ...config.value, modelPath: modelPath.value })
+  emit('confirm', { ...config.value, modelPath: modelPath.value, dinoModelPath: dinoPath.value })
 }
 
 // 关闭对话框

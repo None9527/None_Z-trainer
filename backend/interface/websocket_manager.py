@@ -135,8 +135,11 @@ class ConnectionManager:
                                 }
                             if "loss" in step_data:
                                 progress["loss"] = float(step_data["loss"])
+                            if "ema_loss" in step_data:
+                                progress["ema_loss"] = float(step_data["ema_loss"])
                             if "lr" in step_data:
                                 progress["lr"] = float(step_data["lr"])
+                                progress["learningRate"] = float(step_data["lr"])
                             msg["progress"] = progress
 
                     await self.broadcast(msg)

@@ -144,6 +144,7 @@ def parse_args(argv=None) -> SimpleNamespace:
         cfg_training=bool(acrf.get("cfg_training", False)),
         cfg_scale=float(acrf.get("cfg_scale", 7.0)),
         cfg_training_ratio=float(acrf.get("cfg_training_ratio", 0.3)),
+        loss_weighting=acrf.get("loss_weighting", "none"),
 
         # ── Network / LoRA ──
         network_dim=int(network.get("dim", network.get("network_dim", 8))),
@@ -153,6 +154,8 @@ def parse_args(argv=None) -> SimpleNamespace:
         train_adaln=bool(lora_sec.get("train_adaln", False)),
         train_norm=bool(lora_sec.get("train_norm", False)),
         train_single_stream=bool(lora_sec.get("train_single_stream", False)),
+        train_refiner=bool(lora_sec.get("train_refiner", False)),
+        enable_ste_tanh=bool(lora_sec.get("enable_ste_tanh", False)),
 
         # ── ControlNet ──
         controlnet_resume=bool(cnet.get("resume_training", False)),
@@ -186,12 +189,9 @@ def parse_args(argv=None) -> SimpleNamespace:
         lambda_light=float(training.get("lambda_light", 0.5)),
         lambda_color=float(training.get("lambda_color", 0.3)),
 
-        enable_dino=bool(training.get("enable_dino", False)),
-        lambda_dino=float(training.get("lambda_dino", 0.1)),
-        dino_model=os.getenv("DINO_MODEL_PATH", "").strip() or training.get("dino_model", "facebook/dinov3-vitb16-pretrain-lvd1689m"),
-        dino_image_size=int(training.get("dino_image_size", 512)),
-        dino_vae_path=training.get("dino_vae_path", ""),
-        dino_feature_mode=training.get("dino_feature_mode", "patch"),  # patch | cls | both
+        # DINO spatial attention mask (replaces old STE DINO loss)
+        enable_dino_mask=bool(training.get("enable_dino_mask", False)),
+        dino_mask_base_ratio=float(training.get("dino_mask_base_ratio", 0.2)),
 
 
         # ── Dataset ──
@@ -302,9 +302,15 @@ def main(args: SimpleNamespace):
         train_adaln=args.train_adaln,
         train_norm=args.train_norm,
         train_single_stream=args.train_single_stream,
+        train_refiner=args.train_refiner,
     )
     network.apply_to(transformer)
     network.to(device=device, dtype=weight_dtype)
+
+    # --- STE tanh patch (optional, bypasses tanh gradient attenuation) ---
+    if getattr(args, 'enable_ste_tanh', False):
+        from shared.patches.ste_tanh import apply_ste_tanh
+        apply_ste_tanh(transformer)
 
     # --- Structured config summary (after network created) ---
     if accelerator.is_main_process:
@@ -334,6 +340,7 @@ def main(args: SimpleNamespace):
         if args.train_adaln: extra_targets.append("AdaLN")
         if args.train_norm: extra_targets.append("Norm")
         if args.train_single_stream: extra_targets.append("SingleStream")
+        if args.train_refiner: extra_targets.append("Refiner")
         if extra_targets:
             logger.info(f"│  Extra targets: {', '.join(extra_targets)}")
         logger.info("├─ Optimizer ───────────────────────────────────────┤")
@@ -347,7 +354,7 @@ def main(args: SimpleNamespace):
         if args.lambda_cosine > 0: active_losses.append(f"Cosine×{args.lambda_cosine}")
         if args.enable_freq and args.lambda_freq > 0: active_losses.append(f"Freq×{args.lambda_freq}")
         if args.enable_style and args.lambda_style > 0: active_losses.append(f"Style×{args.lambda_style}")
-        if args.enable_dino and args.lambda_dino > 0: active_losses.append(f"Dino×{args.lambda_dino}")
+        if args.enable_dino_mask: active_losses.append(f"DinoMask(base={args.dino_mask_base_ratio})")
         if args.enable_timestep_aware_loss: active_losses.append("TimestepAware")
         if args.enable_curvature: active_losses.append(f"Curvature×{args.lambda_curvature}")
         if args.cfg_training: active_losses.append(f"CFG(s={args.cfg_scale})")
@@ -384,10 +391,18 @@ def main(args: SimpleNamespace):
     # ------------------------------------------------------------------
     # 5. Loss Functions
     # ------------------------------------------------------------------
+    # Precompute BSMNTW weight table (ZTuner style)
+    bsmntw_weights = None
+    if getattr(args, 'loss_weighting', 'none') == 'gaussian':
+        _steps = 1000
+        _all_t = torch.arange(_steps, dtype=torch.float32)
+        _y = torch.exp(-2.0 * ((_all_t - _steps / 2) / _steps) ** 2)
+        _y_shifted = _y - _y.min()
+        bsmntw_weights = _y_shifted * (_steps / _y_shifted.sum())
+        accelerator.print(f"[BSMNTW] Precomputed weight table: min={bsmntw_weights.min():.4f} max={bsmntw_weights.max():.4f} mean={bsmntw_weights.mean():.4f}")
+
     freq_loss_fn = None
     style_loss_fn = None
-    dino_loss_fn = None
-
     if args.enable_freq and args.lambda_freq > 0:
         from shared.losses import FrequencyAwareLoss
         freq_loss_fn = FrequencyAwareLoss(
@@ -401,29 +416,6 @@ def main(args: SimpleNamespace):
             lambda_light=args.lambda_light,
             lambda_color=args.lambda_color,
         )
-
-    if args.enable_dino and args.lambda_dino > 0:
-        from shared.losses import DinoPerceptualLoss
-        # Auto-derive VAE path from dit if not specified
-        _vae_path = args.dino_vae_path
-        if not _vae_path:
-            _vae_candidate = os.path.join(args.dit, "vae")
-            if os.path.isdir(_vae_candidate):
-                _vae_path = _vae_candidate
-                if accelerator.is_main_process:
-                    logger.info(f"[DinoLoss] Auto-detected VAE: {_vae_path}")
-            else:
-                raise ValueError(
-                    f"DINOv3 loss requires VAE but none found. "
-                    f"Set training.dino_vae_path or ensure {_vae_candidate} exists."
-                )
-        dino_loss_fn = DinoPerceptualLoss(
-            dino_model_path=args.dino_model,
-            vae_path=_vae_path,
-            dino_image_size=args.dino_image_size,
-            feature_mode=args.dino_feature_mode,
-        )
-        dino_loss_fn.to(device)
 
     # ------------------------------------------------------------------
     # 6. DataLoader
@@ -489,13 +481,12 @@ def main(args: SimpleNamespace):
         or args.lambda_cosine > 0
         or (args.enable_freq and args.lambda_freq > 0)
         or (args.enable_style and args.lambda_style > 0)
-        or (args.enable_dino and args.lambda_dino > 0)
     )
     if not has_loss:
         raise ValueError(
             "No loss function enabled! Set at least one of: "
             "lambda_mse, lambda_l1, lambda_cosine, enable_freq+lambda_freq, "
-            "enable_style+lambda_style, enable_dino+lambda_dino"
+            "enable_style+lambda_style"
         )
 
     # ------------------------------------------------------------------
@@ -592,6 +583,8 @@ def main(args: SimpleNamespace):
     _accum_loss = 0.0
     _accum_components: Dict[str, float] = {}
     _accum_count = 0
+    _ema_loss_raw = 0.0    # uncorrected EMA accumulator
+    _ema_step = 0          # bias correction counter
 
     for epoch in range(args.num_train_epochs):
         network.train()
@@ -604,6 +597,10 @@ def main(args: SimpleNamespace):
         for step_in_epoch, batch in enumerate(train_dataloader):
             if interrupted:
                 break
+
+            _step_raw_grad_norm = None
+            _step_clipped_grad_norm = None
+            _step_layer_grads = None
 
             with accelerator.accumulate(network):
                 # --------------------------------------------------
@@ -761,15 +758,41 @@ def main(args: SimpleNamespace):
                 loss_components: Dict[str, float] = {}
                 loss = torch.tensor(0.0, device=model_pred.device, dtype=model_pred.dtype)
 
+                # Prepare DINO spatial attention mask if enabled
+                _spatial_mask = None
+                if args.enable_dino_mask and "dino_mask" in batch:
+                    _raw_mask = batch["dino_mask"].to(device=model_pred.device, dtype=model_pred.dtype)
+                    # _raw_mask shape: (B, gh, gw) — add channel dim for interpolation
+                    if _raw_mask.dim() == 2:
+                        _raw_mask = _raw_mask.unsqueeze(0)  # single sample → (1, gh, gw)
+                    _raw_mask = _raw_mask.unsqueeze(1)  # (B, 1, gh, gw)
+                    # Interpolate to latent spatial dimensions
+                    _spatial_mask = F.interpolate(
+                        _raw_mask,
+                        size=(model_pred.shape[2], model_pred.shape[3]),
+                        mode="bilinear", align_corners=False,
+                    )  # (B, 1, H, W)
+                    # Apply base ratio: base + (1 - base) * mask
+                    br = args.dino_mask_base_ratio
+                    _spatial_mask = br + (1.0 - br) * _spatial_mask
+
                 # MSE loss (optional, default on)
                 if args.lambda_mse > 0:
-                    mse_loss = F.mse_loss(model_pred, target_velocity)
+                    if _spatial_mask is not None:
+                        mse_raw = (model_pred.float() - target_velocity.float()) ** 2
+                        mse_loss = (mse_raw * _spatial_mask).mean()
+                    else:
+                        mse_loss = F.mse_loss(model_pred, target_velocity)
                     loss = loss + args.lambda_mse * mse_loss
                     loss_components["mse"] = mse_loss.item()
 
                 # L1 loss (optional)
                 if args.lambda_l1 > 0:
-                    l1_loss = F.l1_loss(model_pred, target_velocity)
+                    if _spatial_mask is not None:
+                        l1_raw = (model_pred.float() - target_velocity.float()).abs()
+                        l1_loss = (l1_raw * _spatial_mask).mean()
+                    else:
+                        l1_loss = F.l1_loss(model_pred, target_velocity)
                     loss = loss + args.lambda_l1 * l1_loss
                     loss_components["l1"] = l1_loss.item()
 
@@ -793,25 +816,6 @@ def main(args: SimpleNamespace):
                     loss = loss + args.lambda_style * style_l
                     loss_components["style"] = style_l.item()
 
-                # DINOv3 perceptual loss
-                if dino_loss_fn is not None and args.lambda_dino > 0:
-                    # Assemble cached embedding based on feature_mode
-                    cached_emb = None
-                    _mode = args.dino_feature_mode
-                    _patch = batch.get("dino_emb", None)
-                    _cls = batch.get("dino_cls", None)
-                    if _mode == "cls" and _cls is not None:
-                        cached_emb = _cls
-                    elif _mode == "both" and _cls is not None and _patch is not None:
-                        cached_emb = torch.cat([_cls, _patch], dim=-2)
-                    elif _patch is not None:
-                        cached_emb = _patch
-                    dino_l = dino_loss_fn(
-                        model_pred, target_velocity, z_t, sigmas * 1000.0,
-                        num_train_timesteps=1000, cached_dino_emb=cached_emb,
-                    )
-                    loss = loss + args.lambda_dino * dino_l
-                    loss_components["dino"] = dino_l.item()
 
                 # Timestep-aware loss weighting
                 if args.enable_timestep_aware_loss:
@@ -843,13 +847,30 @@ def main(args: SimpleNamespace):
                 # --------------------------------------------------
                 # Min-SNR Weighting
                 # --------------------------------------------------
+                scheduler_timesteps = sigmas * 1000.0
+
+                # Save raw loss (before timestep-aware / SNR / BSMNTW weighting)
+                loss_raw = loss.detach().float().item()
+                loss_components["loss_raw"] = loss_raw
+
                 if args.snr_gamma > 0:
-                    scheduler_timesteps = sigmas * 1000.0
                     snr_weights = compute_snr_weights(
                         scheduler_timesteps, num_train_timesteps=1000,
                         snr_gamma=args.snr_gamma, snr_floor=args.snr_floor,
                     )
                     loss = loss * snr_weights.mean()
+                    loss_components["snr_w"] = snr_weights.mean().item()
+
+                # --------------------------------------------------
+                # Gaussian Loss Weighting (ZTuner BSMNTW style)
+                #   预计算的权重表 lookup，与采样空间对齐
+                # --------------------------------------------------
+                if bsmntw_weights is not None:
+                    _tidx = scheduler_timesteps.long().clamp(0, 999)
+                    _w = bsmntw_weights.to(_tidx.device)[_tidx]
+                    _bsmntw_val = _w.mean().item()
+                    loss = loss * _bsmntw_val
+                    loss_components["bsmntw_w"] = _bsmntw_val
 
                 # --------------------------------------------------
                 # Regularization dataset loss
@@ -892,15 +913,6 @@ def main(args: SimpleNamespace):
                         loss = loss + reg_w * reg_loss
                         loss_components["reg"] = reg_loss.item()
 
-                # --------------------------------------------------
-                # NaN / Inf protection
-                # --------------------------------------------------
-                if torch.isnan(loss) or torch.isinf(loss):
-                    if accelerator.is_main_process:
-                        logger.warning(f"[NaN] Loss is NaN/Inf at step {global_step}, skipping. Components: {loss_components}")
-                    optimizer.zero_grad()
-                    continue
-
                 # Accumulate loss across micro-batches for averaging
                 _accum_loss += loss.detach().float().item()
                 for k, v in loss_components.items():
@@ -912,8 +924,39 @@ def main(args: SimpleNamespace):
                 # --------------------------------------------------
                 accelerator.backward(loss)
 
-                if args.max_grad_norm > 0 and accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(network.parameters(), args.max_grad_norm)
+                if accelerator.sync_gradients:
+                    # Compute raw gradient norm (before clipping)
+                    _grads = [p.grad for p in network.parameters() if p.grad is not None]
+                    if _grads:
+                        _step_raw_grad_norm = torch.norm(
+                            torch.stack([torch.norm(g.detach(), 2) for g in _grads]), 2
+                        ).item()
+                    else:
+                        _step_raw_grad_norm = 0.0
+
+                    # Clip gradients
+                    if args.max_grad_norm > 0:
+                        accelerator.clip_grad_norm_(network.parameters(), args.max_grad_norm)
+
+                    # Compute clipped gradient norm (after clipping)
+                    _grads = [p.grad for p in network.parameters() if p.grad is not None]
+                    if _grads:
+                        _step_clipped_grad_norm = torch.norm(
+                            torch.stack([torch.norm(g.detach(), 2) for g in _grads]), 2
+                        ).item()
+                    else:
+                        _step_clipped_grad_norm = 0.0
+
+                    # Collect per-layer LoRA grads BEFORE zero_grad clears them
+                    if (global_step + 1) % 50 == 1:
+                        unwrapped_net = accelerator.unwrap_model(network)
+                        _step_layer_grads = {}
+                        for name, lora_mod in unwrapped_net.lora_modules.items():
+                            d_grad = lora_mod.lora_down.weight.grad
+                            u_grad = lora_mod.lora_up.weight.grad
+                            d_norm = torch.norm(d_grad).item() if d_grad is not None else 0.0
+                            u_norm = torch.norm(u_grad).item() if u_grad is not None else 0.0
+                            _step_layer_grads[name] = (d_norm, u_norm)
 
                 optimizer.step()
                 lr_scheduler.step()
@@ -934,6 +977,15 @@ def main(args: SimpleNamespace):
             epoch_loss += avg_loss
             epoch_steps += 1
 
+            # Exponential moving average of RAW loss with bias correction (Adam-style)
+            # This reflects true model prediction error without timestep weighting noise
+            # Bias correction eliminates cold-start inflation: corrected = raw / (1 - β^step)
+            _ema_beta = 0.99        # β = 1 - α, equivalent to α=0.01
+            _raw_val = avg_components.get("loss_raw", avg_loss)
+            _ema_step += 1
+            _ema_loss_raw = _ema_beta * _ema_loss_raw + (1 - _ema_beta) * _raw_val
+            _ema_loss = _ema_loss_raw / (1 - _ema_beta ** _ema_step)  # bias-corrected
+
             # Reset accumulators
             _accum_loss = 0.0
             _accum_components = {}
@@ -945,9 +997,17 @@ def main(args: SimpleNamespace):
                 mode_tag = ""
                 if args.timestep_mode in ("acrf", "anchor"):
                     mode_tag = " [ACRF]" if not use_free else " [FREE]"
+
+                # Gradient norm string
+                grad_str = ""
+                if _step_raw_grad_norm is not None:
+                    grad_str = f" grad_raw={_step_raw_grad_norm:.4f}"
+                    if _step_clipped_grad_norm is not None:
+                        grad_str += f" grad_clip={_step_clipped_grad_norm:.4f}"
+
                 print(
                     f"[STEP] epoch={epoch+1} step={global_step}/{total_training_steps} "
-                    f"loss={avg_loss:.5f} lr={current_lr:.2e}{mode_tag} | {loss_str}",
+                    f"loss={avg_loss:.5f} ema_loss={_ema_loss:.5f} lr={current_lr:.2e}{mode_tag}{grad_str} | {loss_str}",
                     flush=True,
                 )
 
@@ -955,8 +1015,46 @@ def main(args: SimpleNamespace):
                 tb_logs = {"train/loss": avg_loss, "train/lr": current_lr}
                 for k, v in avg_components.items():
                     tb_logs[f"train/{k}"] = v
-                tb_logs["train/avg_loss"] = epoch_loss / max(epoch_steps, 1)
+                tb_logs["train/ema_loss"] = _ema_loss
+                tb_logs["train/epoch_avg_loss"] = epoch_loss / max(epoch_steps, 1)
                 tb_logs["train/epoch"] = epoch + 1
+                if _step_raw_grad_norm is not None:
+                    tb_logs["train/grad_norm_raw"] = _step_raw_grad_norm
+                if _step_clipped_grad_norm is not None:
+                    tb_logs["train/grad_norm_clipped"] = _step_clipped_grad_norm
+
+                # Per-layer LoRA gradient diagnostics (pre-collected before zero_grad)
+                if _step_layer_grads is not None:
+                    import re as _re
+                    depth_groups = {"front": [], "mid": [], "back": [], "refiner": [], "other": []}
+                    for name, (d_n, u_n) in _step_layer_grads.items():
+                        total = d_n + u_n
+                        m = _re.search(r"layers_(\d+)_", name)
+                        if m:
+                            idx = int(m.group(1))
+                            if idx < 10:
+                                depth_groups["front"].append(total)
+                            elif idx < 20:
+                                depth_groups["mid"].append(total)
+                            else:
+                                depth_groups["back"].append(total)
+                        elif "refiner" in name:
+                            depth_groups["refiner"].append(total)
+                        else:
+                            depth_groups["other"].append(total)
+
+                    parts = []
+                    for group, vals in depth_groups.items():
+                        if vals:
+                            avg_g = sum(vals) / len(vals)
+                            max_g = max(vals)
+                            parts.append(f"{group}(n={len(vals)} avg={avg_g:.5f} max={max_g:.5f})")
+                    print(f"[GRAD_DIAG] step={global_step} | {' | '.join(parts)}", flush=True)
+
+                    for group, vals in depth_groups.items():
+                        if vals:
+                            tb_logs[f"grad/{group}_avg"] = sum(vals) / len(vals)
+                            tb_logs[f"grad/{group}_max"] = max(vals)
                 accelerator.log(tb_logs, step=global_step)
 
         # --------------------------------------------------

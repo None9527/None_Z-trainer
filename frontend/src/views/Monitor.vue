@@ -162,11 +162,11 @@
       <div class="time-grid">
         <div class="time-item">
           <div class="time-label">已运行时间</div>
-          <div class="time-value">{{ formatTime(progress.elapsedTime) }}</div>
+          <div class="time-value">{{ formatDuration(progress.elapsedTime) }}</div>
         </div>
         <div class="time-item">
           <div class="time-label">预计剩余时间</div>
-          <div class="time-value">{{ formatTime(progress.estimatedTimeRemaining) }}</div>
+          <div class="time-value">{{ formatDuration(progress.estimatedTimeRemaining) }}</div>
         </div>
         <div class="time-item">
           <div class="time-label">预计完成时间</div>
@@ -268,10 +268,21 @@ async function refreshRuns() {
     const res = await axios.get('/api/training/runs')
     availableRuns.value = res.data.runs || []
     
-    // 如果有记录且未选择，自动选择最新的
-    if (availableRuns.value.length > 0 && !selectedRun.value) {
-      selectedRun.value = availableRuns.value[0].name
-      await loadRunData()
+    if (availableRuns.value.length > 0) {
+      // 训练中时自动选中当前训练的 run
+      if (trainingStore.progress.isRunning && currentTrainingName.value) {
+        const target = availableRuns.value.find(r => r.name === currentTrainingName.value)
+        if (target && selectedRun.value !== target.name) {
+          selectedRun.value = target.name
+          await loadRunData()
+          return
+        }
+      }
+      // 未选择时自动选最新的（后端已按 mtime 倒序排列）
+      if (!selectedRun.value) {
+        selectedRun.value = availableRuns.value[0].name
+        await loadRunData()
+      }
     }
   } catch (e) {
     console.error('获取训练记录失败:', e)
@@ -291,8 +302,8 @@ async function loadRunData() {
     
     const scalars = res.data.scalars || {}
     
-    // 提取 loss 数据
-    const lossData = scalars['train/loss'] || scalars['train/ema_loss'] || []
+    // 提取 loss 数据 — 优先使用 ema_loss（对 loss_raw 做 β=0.99 EMA，排除 SNR/BSMNTW 加权噪声）
+    const lossData = scalars['train/ema_loss'] || scalars['train/loss'] || []
     historyLoss.value = lossData.map((d: any) => d.value)
     
     // 提取 lr 数据 (train.py logs as "train/lr")
@@ -333,10 +344,11 @@ function stopPolling() {
 }
 
 // 监听训练状态，控制轮询
-watch(() => trainingStore.progress.isRunning, (running) => {
+watch(() => trainingStore.progress.isRunning, async (running) => {
   if (running) {
-    // 训练开始时，刷新训练记录列表并开始轮询
-    refreshRuns()
+    // 训练开始时，先获取当前训练名再刷新列表（确保自动选中）
+    await fetchCurrentTrainingName()
+    await refreshRuns()
     startPolling()
   } else {
     // 训练结束，停止轮询并刷新最终数据
@@ -345,10 +357,10 @@ watch(() => trainingStore.progress.isRunning, (running) => {
   }
 }, { immediate: true })
 
-// 页面加载时获取训练记录
-onMounted(() => {
-  fetchCurrentTrainingName()
-  refreshRuns()
+// 页面加载时获取训练记录（先取名称，再刷新列表——顺序关键）
+onMounted(async () => {
+  await fetchCurrentTrainingName()
+  await refreshRuns()
 })
 
 // 页面卸载时清理定时器
@@ -392,9 +404,13 @@ const tempClass = computed(() => {
 })
 
 const estimatedEndTime = computed(() => {
-  if (progress.value.estimatedTimeRemaining <= 0) return '--:--'
-  const endDate = new Date(Date.now() + progress.value.estimatedTimeRemaining * 1000)
-  return endDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  if (progress.value.estimatedTimeRemaining <= 0) return '--'
+  const end = new Date(Date.now() + progress.value.estimatedTimeRemaining * 1000)
+  const month = end.getMonth() + 1
+  const day = end.getDate()
+  const hour = end.getHours().toString().padStart(2, '0')
+  const min = end.getMinutes().toString().padStart(2, '0')
+  return `${month}/${day} ${hour}:${min}`
 })
 
 const avgStepTime = computed(() => {
@@ -569,12 +585,12 @@ const lrChartOption = computed(() => ({
   ]
 }))
 
-function formatTime(seconds: number): string {
-  if (seconds <= 0) return '--:--:--'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+function formatDuration(seconds: number): string {
+  if (seconds <= 0) return '--'
+  if (seconds < 60) return `${Math.floor(seconds)}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}min`
+  const hours = seconds / 3600
+  return hours >= 10 ? `${Math.round(hours)}h` : `${hours.toFixed(1)}h`
 }
 
 // GPU 数据通过 WebSocket 实时更新，无需手动获取

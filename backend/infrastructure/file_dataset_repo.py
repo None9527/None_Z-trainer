@@ -363,6 +363,113 @@ class FileDatasetRepository(IDatasetRepository):
             channels=channels,
         )
 
+    def browse(self, subpath: str = "") -> Dict:
+        """Browse datasets directory at a given subpath level.
+
+        Returns folders (organizational dirs) and datasets (dirs with images).
+        A directory can be both a folder and a dataset simultaneously.
+        """
+        base = self._dataset_path
+        if subpath:
+            browse_dir = base / subpath
+        else:
+            browse_dir = base
+
+        # Safety: ensure path doesn't escape base
+        try:
+            browse_dir.resolve().relative_to(base.resolve())
+        except ValueError:
+            return {"folders": [], "datasets": [], "subpath": subpath, "breadcrumb": []}
+
+        if not browse_dir.exists() or not browse_dir.is_dir():
+            return {"folders": [], "datasets": [], "subpath": subpath, "breadcrumb": []}
+
+        folders = []
+        datasets = []
+
+        for item in sorted(browse_dir.iterdir()):
+            if not item.is_dir() or item.name.startswith('.'):
+                continue
+
+            # Count direct images (non-recursive)
+            direct_images = _count_images_in_dir(item)
+
+            # Count child subdirectories (that are not hidden)
+            child_dirs = [
+                d for d in item.iterdir()
+                if d.is_dir() and not d.name.startswith('.')
+            ]
+
+            item_subpath = f"{subpath}/{item.name}" if subpath else item.name
+
+            # Detect dataset type (multi-channel has target/ subdir)
+            dataset_type = self._detect_type_internal(item)
+            is_dataset = direct_images > 0 or dataset_type == DatasetType.MULTI_CHANNEL
+
+            # If has child subdirectories AND is not itself a dataset → it's a folder
+            if child_dirs and not is_dataset:
+                child_count = len(child_dirs)
+                folders.append({
+                    "name": item.name,
+                    "subpath": item_subpath,
+                    "childCount": child_count,
+                    "hasImages": direct_images > 0,
+                    "imageCount": direct_images,
+                })
+
+            # If it's a dataset (has images) → show as dataset
+            elif is_dataset:
+                total_images = direct_images if dataset_type == DatasetType.STANDARD else sum(
+                    1 for f in item.rglob("*")
+                    if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+                )
+                entry = {
+                    "name": item.name,
+                    "path": str(item),
+                    "imageCount": total_images,
+                    "type": dataset_type.value,
+                }
+                if dataset_type == DatasetType.MULTI_CHANNEL:
+                    channels = self._detect_channels_internal(item)
+                    entry["channels"] = [ch.to_dict() for ch in channels]
+                datasets.append(entry)
+
+            # Empty directory → show as empty dataset (user can upload to it)
+            else:
+                datasets.append({
+                    "name": item.name,
+                    "path": str(item),
+                    "imageCount": 0,
+                    "type": "standard",
+                })
+
+        breadcrumb = subpath.split("/") if subpath else []
+
+        return {
+            "folders": folders,
+            "datasets": datasets,
+            "subpath": subpath,
+            "breadcrumb": breadcrumb,
+        }
+
+    def create_folder(self, name: str, parent_subpath: str = "") -> Path:
+        """Create an organizational folder within datasets directory."""
+        base = self._dataset_path
+        if parent_subpath:
+            parent = base / parent_subpath
+        else:
+            parent = base
+
+        # Safety check
+        try:
+            parent.resolve().relative_to(base.resolve())
+        except ValueError:
+            raise ValueError("Path traversal detected")
+
+        folder = parent / name.strip()
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
     # --- Private helpers ---
 
     def _resolve_path(self, path: str) -> Path:

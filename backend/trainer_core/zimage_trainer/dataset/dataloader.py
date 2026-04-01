@@ -82,7 +82,7 @@ class ZImageLatentDataset(Dataset):
         resolutions = []
         
         # Find all latent files
-        latent_files = list(cache_dir.glob(self.latent_pattern))
+        latent_files = list(cache_dir.rglob(self.latent_pattern))
         
         for latent_path in latent_files:
             # Parse resolution
@@ -126,7 +126,7 @@ class ZImageLatentDataset(Dataset):
         else:
             base_name = name.rsplit('_', 1)[0]
         
-        return cache_dir / f"{base_name}{self.te_suffix}"
+        return latent_path.parent / f"{base_name}{self.te_suffix}"
     
     def __len__(self) -> int:
         return len(self.cache_files)
@@ -185,6 +185,8 @@ class ZImageLatentDataset(Dataset):
                 result["dino_emb"] = dino_data["dino_emb"]   # (P, D)
             if "dino_cls" in dino_data:
                 result["dino_cls"] = dino_data["dino_cls"]   # (1, D)
+            if "dino_mask" in dino_data:
+                result["dino_mask"] = dino_data["dino_mask"] # (gh, gw)
         
         return result
 
@@ -253,7 +255,7 @@ class ControlNetDataset(Dataset):
             
             # Find text encoder cache
             base_name = parts[0]
-            te_path = cache_dir / f"{base_name}{self.te_suffix}"
+            te_path = latent_path.parent / f"{base_name}{self.te_suffix}"
             
             if te_path.exists():
                 files.append((latent_path, te_path))
@@ -368,7 +370,7 @@ class Img2ImgDataset(Dataset):
                         pass
             
             base_name = parts[0]
-            te_path = cache_dir / f"{base_name}{self.te_suffix}"
+            te_path = latent_path.parent / f"{base_name}{self.te_suffix}"
             
             if te_path.exists():
                 files.append((latent_path, te_path))
@@ -485,7 +487,7 @@ class OmniDataset(Dataset):
                         pass
             
             base_name = parts[0]
-            te_path = cache_dir / f"{base_name}{self.te_suffix}"
+            te_path = latent_path.parent / f"{base_name}{self.te_suffix}"
             
             # 查找 SigLIP 特征 (可选)
             siglip_dir = self.condition_cache_dir or cache_dir
@@ -663,7 +665,7 @@ class MultiChannelDataset(Dataset):
                     continue
 
             base_name = self._extract_base_name(target_path.stem)
-            te_path = cache_dir / f"{base_name}{self.te_suffix}"
+            te_path = target_path.parent / f"{base_name}{self.te_suffix}"
 
             if not te_path.exists():
                 continue

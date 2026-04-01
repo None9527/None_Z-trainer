@@ -77,6 +77,14 @@ def get_optimizer(
             params, lr=learning_rate, weight_decay=weight_decay,
         )
 
+    # --- AdamWFP8SR (Stochastic Rounding) ---
+    elif opt_type in ["adamwfp8sr", "adamfp8sr", "fp8sr"]:
+        from shared.optimizers.adamw_fp8_sr import AdamWFP8SR
+        logger.info("Using AdamWFP8SR optimizer (FP8 + stochastic rounding)")
+        return AdamWFP8SR(
+            params, lr=learning_rate, weight_decay=weight_decay,
+        )
+
     # --- AdamWBF16 ---
     elif opt_type in ["adamwbf16", "adambf16"]:
         from shared.optimizers import AdamWBF16
@@ -144,6 +152,26 @@ def get_optimizer(
         except ImportError:
             logger.warning("bitsandbytes not available for Lion8bit, falling back to AdamW")
             return torch.optim.AdamW(params, lr=learning_rate, weight_decay=weight_decay)
+
+    # --- Muon ---
+    elif opt_type in ["muon"]:
+        from shared.optimizers.muon import Muon
+        logger.info("Using Muon optimizer (momentum + orthogonalization, RMSNorm immune)")
+        return Muon(
+            params, lr=learning_rate, weight_decay=weight_decay,
+            momentum=kwargs.get("momentum", 0.95),
+            ns_steps=kwargs.get("ns_steps", 5),
+        )
+
+    # --- MuonFP8 ---
+    elif opt_type in ["muonfp8", "muon8bit", "muon_fp8"]:
+        from shared.optimizers.muon import MuonFP8
+        logger.info("Using MuonFP8 optimizer (Muon + FP8 momentum, lowest memory)")
+        return MuonFP8(
+            params, lr=learning_rate, weight_decay=weight_decay,
+            momentum=kwargs.get("momentum", 0.95),
+            ns_steps=kwargs.get("ns_steps", 5),
+        )
 
     # --- SGD ---
     elif opt_type in ["sgd"]:

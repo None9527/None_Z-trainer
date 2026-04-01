@@ -84,6 +84,7 @@ def _default_config() -> dict:
             "resume_training": False,
             "resume_lora_path": "",
             "train_adaln": False,
+            "train_refiner": False,
             "train_norm": False,
             "train_single_stream": False,
         },
@@ -395,7 +396,7 @@ async def list_runs():
     runs = []
     # Skip structural directories created by ensure_dirs()
     skip_dirs = {"finetune", "lora", "logs"}
-    for d in sorted(out.iterdir()):
+    for d in out.iterdir():
         if not d.is_dir():
             # Check for loose .safetensors files
             if d.suffix == ".safetensors":
@@ -404,6 +405,7 @@ async def list_runs():
                     "path": str(d),
                     "size_mb": round(d.stat().st_size / (1024 * 1024), 1),
                     "type": "file",
+                    "mtime": d.stat().st_mtime,
                 })
             continue
         if d.name in skip_dirs:
@@ -417,7 +419,10 @@ async def list_runs():
             "checkpoints": len(safetensors),
             "has_logs": logs_dir.exists(),
             "type": "directory",
+            "mtime": d.stat().st_mtime,
         })
+    # Sort by modification time, newest first
+    runs.sort(key=lambda r: r.get("mtime", 0), reverse=True)
     return {"runs": runs}
 
 
@@ -608,7 +613,7 @@ def _parse_training_info(logs: List[str]) -> dict:
     # Merge last step info
     if last_step:
         info["current_step"] = last_step.get("step", "")
-        info["current_loss"] = last_step.get("loss", "")
+        info["current_loss"] = last_step.get("ema_loss", last_step.get("loss", ""))
         info["current_lr"] = last_step.get("lr", "")
         info["current_epoch"] = last_step.get("epoch", "")
 

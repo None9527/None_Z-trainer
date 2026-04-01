@@ -20,6 +20,16 @@ class GenerationStatus(Enum):
 
 
 @dataclass
+class LoRAConfig:
+    """Single LoRA configuration for inference."""
+    path: str
+    scale: float = 1.0
+
+    def to_dict(self) -> dict:
+        return {"path": self.path, "scale": self.scale}
+
+
+@dataclass
 class GenerationRequest:
     """Image generation parameters."""
     prompt: str = ""
@@ -30,9 +40,17 @@ class GenerationRequest:
     guidance_scale: float = 3.5
     seed: int = -1
     num_images: int = 1
-    lora_path: Optional[str] = None
-    lora_scale: float = 1.0
+    lora_configs: List[LoRAConfig] = field(default_factory=list)
     transformer_path: Optional[str] = None
+
+    # Compat properties for single-lora code paths
+    @property
+    def lora_path(self) -> Optional[str]:
+        return self.lora_configs[0].path if self.lora_configs else None
+
+    @property
+    def lora_scale(self) -> float:
+        return self.lora_configs[0].scale if self.lora_configs else 1.0
 
 
 @dataclass
@@ -46,8 +64,16 @@ class GenerationResult:
     height: int = 0
     steps: int = 0
     guidance_scale: float = 0.0
-    lora_path: Optional[str] = None
-    lora_scale: float = 1.0
+    lora_configs: List[LoRAConfig] = field(default_factory=list)
+
+    # Compat properties
+    @property
+    def lora_path(self) -> Optional[str]:
+        return self.lora_configs[0].path if self.lora_configs else None
+
+    @property
+    def lora_scale(self) -> float:
+        return self.lora_configs[0].scale if self.lora_configs else 1.0
 
 
 @dataclass

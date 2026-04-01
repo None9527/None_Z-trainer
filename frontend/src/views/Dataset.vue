@@ -12,10 +12,17 @@
         <el-button type="primary" size="large" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon> 新建数据集
         </el-button>
-        <el-button size="large" @click="loadLocalDatasets">
+        <el-button size="large" @click="showCreateFolderDialog = true">
+          <el-icon><FolderAdd /></el-icon> 新建文件夹
+        </el-button>
+        <el-button size="large" @click="refreshCurrentLevel">
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
         <el-divider direction="vertical" />
+        <!-- Open current folder as a single dataset for bulk operations -->
+        <el-button v-if="datasetStore.currentSubpath" type="success" size="large" @click="openFolderAsDataset">
+          <el-icon><FolderOpened /></el-icon> 打开为数据集
+        </el-button>
         <el-divider direction="vertical" />
         <div class="toolbar-section">
           <input type="file" ref="folderInput" webkitdirectory directory hidden @change="handleFolderSelect" />
@@ -25,8 +32,33 @@
         </div>
       </div>
 
-      <!-- Folder Grid -->
-      <div class="folder-grid" v-if="localDatasets.length > 0">
+      <!-- Breadcrumb Navigation -->
+      <div class="breadcrumb-bar glass-card" v-if="datasetStore.breadcrumb.length > 0">
+        <el-breadcrumb separator="/">
+          <el-breadcrumb-item @click="navigateTo('')">
+            <span class="breadcrumb-link"><el-icon><HomeFilled /></el-icon> 数据集</span>
+          </el-breadcrumb-item>
+          <el-breadcrumb-item
+            v-for="(segment, idx) in datasetStore.breadcrumb" :key="idx"
+            @click="navigateTo(datasetStore.breadcrumb.slice(0, idx + 1).join('/'))"
+          >
+            <span class="breadcrumb-link">{{ segment }}</span>
+          </el-breadcrumb-item>
+        </el-breadcrumb>
+      </div>
+
+      <!-- Combined Folder + Dataset Grid -->
+      <div class="folder-grid" v-if="datasetStore.subfolders.length > 0 || localDatasets.length > 0">
+        <!-- Subfolders first -->
+        <div class="folder-card subfolder-card glass-card" v-for="folder in datasetStore.subfolders" :key="'f-' + folder.subpath" @click="navigateTo(folder.subpath)">
+          <div class="folder-icon subfolder-icon"><el-icon :size="48"><FolderOpened /></el-icon></div>
+          <div class="folder-info">
+            <div class="folder-name">{{ folder.name }}</div>
+            <div class="folder-meta">{{ folder.childCount }} 个子项<template v-if="folder.hasImages"> · {{ folder.imageCount }} 张图片</template></div>
+          </div>
+          <el-button class="delete-btn" type="danger" :icon="Delete" circle size="small" @click.stop="confirmDeleteFolder(folder)" />
+        </div>
+        <!-- Datasets after -->
         <div class="folder-card glass-card" v-for="ds in localDatasets" :key="ds.name" @click="openDataset(ds)">
           <div class="folder-icon"><el-icon :size="48"><Folder /></el-icon></div>
           <div class="folder-info">
@@ -38,10 +70,10 @@
       </div>
 
       <!-- Empty State -->
-      <div class="empty-state glass-card" v-else>
+      <div class="empty-state glass-card" v-if="localDatasets.length === 0 && datasetStore.subfolders.length === 0">
         <el-icon :size="64"><FolderOpened /></el-icon>
-        <h3>暂无数据集</h3>
-        <p>点击「新建数据集」创建第一个数据集</p>
+        <h3>暂无内容</h3>
+        <p>点击「新建数据集」或「新建文件夹」开始</p>
       </div>
     </template>
 
@@ -279,6 +311,9 @@
     <!-- Create Dataset Dialog -->
     <el-dialog v-model="showCreateDialog" title="新建数据集" width="400px">
       <el-form>
+        <el-form-item v-if="datasetStore.currentSubpath" label="位置">
+          <el-tag type="info">{{ datasetStore.currentSubpath }}</el-tag>
+        </el-form-item>
         <el-form-item label="数据集名称">
           <el-input v-model="newDatasetName" placeholder="输入数据集名称..." @keyup.enter="createDataset" />
         </el-form-item>
@@ -286,6 +321,22 @@
       <template #footer>
         <el-button @click="showCreateDialog = false">取消</el-button>
         <el-button type="primary" @click="createDataset" :loading="isCreating">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Create Folder Dialog -->
+    <el-dialog v-model="showCreateFolderDialog" title="新建文件夹" width="400px">
+      <el-form>
+        <el-form-item v-if="datasetStore.currentSubpath" label="位置">
+          <el-tag type="info">{{ datasetStore.currentSubpath }}</el-tag>
+        </el-form-item>
+        <el-form-item label="文件夹名称">
+          <el-input v-model="newFolderName" placeholder="输入文件夹名称..." @keyup.enter="createFolder" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showCreateFolderDialog = false">取消</el-button>
+        <el-button type="primary" @click="createFolder" :loading="isCreatingFolder">创建</el-button>
       </template>
     </el-dialog>
 
@@ -378,8 +429,9 @@ import { useWebSocketStore } from '@/stores/websocket'
 import { useDatasetManager } from '@/composables/useDatasetManager'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, WarningFilled, MagicStick, ScaleToOriginal, Loading, Clock, Grid,
-  Plus, Refresh, Upload, Folder, FolderOpened, ArrowLeft, Picture, Box, Document, Check } from '@element-plus/icons-vue'
+  Plus, Refresh, Upload, Folder, FolderOpened, ArrowLeft, Picture, Box, Document, Check, HomeFilled, FolderAdd } from '@element-plus/icons-vue'
 import axios from 'axios'
+import type { FolderItem } from '@/stores/dataset'
 
 // Sub-components
 import { PairedImageCard, OmniImageCard } from './dataset/components'
@@ -450,6 +502,9 @@ const cacheModelType = ref('zimage')
 const clearCacheOptions = ref({ latent: true, text: true })
 const newDatasetName = ref('')
 const isCreating = ref(false)
+const showCreateFolderDialog = ref(false)
+const newFolderName = ref('')
+const isCreatingFolder = ref(false)
 
 // Resize state
 const resizing = ref(false)
@@ -480,9 +535,19 @@ function toggleSelectAll() { isAllSelected.value ? datasetStore.clearSelection()
 // ============================================================================
 // Navigation
 // ============================================================================
-async function loadLocalDatasets() { try { await datasetStore.fetchDatasets() } catch {} }
+async function refreshCurrentLevel() { try { await datasetStore.browseFolder(datasetStore.currentSubpath) } catch {} }
+async function navigateTo(subpath: string) { try { await datasetStore.browseFolder(subpath) } catch {} }
+async function openFolderAsDataset() {
+  const subpath = datasetStore.currentSubpath
+  if (!subpath) return
+  const base = datasetStore.datasetsDir
+  const fullPath = `${base}/${subpath}`
+  const name = subpath.split('/').pop() || subpath
+  const virtualDs: LocalDataset = { name: `📁 ${name}`, path: fullPath, imageCount: 0 }
+  currentView.value = virtualDs; datasetPath.value = fullPath; await datasetStore.scanDataset(fullPath)
+}
 async function openDataset(ds: LocalDataset) { currentView.value = ds; datasetPath.value = ds.path; await datasetStore.scanDataset(ds.path) }
-function goBack() { currentView.value = null; datasetStore.clearCurrentDataset() }
+function goBack() { currentView.value = null; datasetStore.clearCurrentDataset(); datasetStore.browseFolder(datasetStore.currentSubpath) }
 async function handlePageChange(page: number) { await datasetStore.loadPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 async function handlePageSizeChange(size: number) { await datasetStore.changePageSize(size) }
 
@@ -501,10 +566,11 @@ function onCaptionSaved() { /* PreviewDialog handles save internally via store *
 // ============================================================================
 async function confirmDeleteDataset(ds: LocalDataset) {
   try {
+    const deletePath = datasetStore.currentSubpath ? `${datasetStore.currentSubpath}/${ds.name}` : ds.name
     await ElMessageBox.confirm(`确定要删除数据集「${ds.name}」吗？此操作不可恢复！`, '删除确认', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning', confirmButtonClass: 'el-button--danger' })
-    await axios.delete(`/api/dataset/${encodeURIComponent(ds.name)}`)
+    await axios.delete(`/api/dataset/${encodeURIComponent(deletePath)}`)
     ElMessage.success(`数据集「${ds.name}」已删除`)
-    await loadLocalDatasets()
+    await datasetStore.browseFolder(datasetStore.currentSubpath)
   } catch {}
 }
 
@@ -512,12 +578,32 @@ async function createDataset() {
   if (!newDatasetName.value.trim()) { ElMessage.warning('请输入数据集名称'); return }
   isCreating.value = true
   try {
-    const formData = new FormData(); formData.append('name', newDatasetName.value.trim())
+    const formData = new FormData(); formData.append('name', newDatasetName.value.trim()); formData.append('parent_path', datasetStore.currentSubpath)
     const response = await axios.post('/api/dataset/create', formData)
     ElMessage.success(`数据集「${response.data.name}」创建成功`)
-    await loadLocalDatasets(); showCreateDialog.value = false; newDatasetName.value = ''
+    await datasetStore.browseFolder(datasetStore.currentSubpath); showCreateDialog.value = false; newDatasetName.value = ''
   } catch (e: any) { ElMessage.error(e.response?.data?.detail || '创建失败') }
   finally { isCreating.value = false }
+}
+
+async function createFolder() {
+  if (!newFolderName.value.trim()) { ElMessage.warning('请输入文件夹名称'); return }
+  isCreatingFolder.value = true
+  try {
+    await datasetStore.createFolder(newFolderName.value.trim())
+    ElMessage.success(`文件夹「${newFolderName.value.trim()}」创建成功`)
+    showCreateFolderDialog.value = false; newFolderName.value = ''
+  } catch (e: any) { ElMessage.error(e.response?.data?.detail || '创建失败') }
+  finally { isCreatingFolder.value = false }
+}
+
+async function confirmDeleteFolder(folder: FolderItem) {
+  try {
+    await ElMessageBox.confirm(`确定要删除文件夹「${folder.name}」吗？其中的所有内容将被删除！`, '删除确认', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning', confirmButtonClass: 'el-button--danger' })
+    await axios.delete(`/api/dataset/${encodeURIComponent(folder.subpath)}`)
+    ElMessage.success(`文件夹「${folder.name}」已删除`)
+    await datasetStore.browseFolder(datasetStore.currentSubpath)
+  } catch {}
 }
 
 async function deleteSelected() {
@@ -567,6 +653,7 @@ async function handleCacheConfirm(config: { modelType: string, trainingMode: str
       datasetPath: currentView.value.path,
       generateLatent: config.options.includes('latent'),
       generateText: config.options.includes('text'),
+      generateDino: config.options.includes('dino'),
       modelPath: config.modelPath,
       modelType: config.modelType,
       mode: config.trainingMode,
@@ -807,7 +894,7 @@ async function uploadFilesInBatches(files: File[], datasetName: string, preserve
       uploadProgress.value = Math.round(((i + batchSize) / files.length) * 100); uploadStats.value = { success: successCount, fail: failCount, total: files.length }
     }
     uploadProgress.value = 100; uploadProgressText.value = '上传完成'; uploadStatus.value = failCount === 0 ? 'success' : (successCount > 0 ? '' : 'exception'); uploadStats.value = { success: successCount, fail: failCount, total: files.length }
-    await loadLocalDatasets()
+    await datasetStore.browseFolder(datasetStore.currentSubpath)
     const newDs = localDatasets.value.find(d => d.name === datasetName); if (newDs) openDataset(newDs)
   } catch (e: any) { uploadProgress.value = 100; uploadProgressText.value = '上传出错: ' + e.message; uploadStatus.value = 'exception' }
   finally { isUploadingFolder.value = false; if (folderInput.value) folderInput.value.value = '' }
@@ -853,7 +940,7 @@ watch(() => cacheStatus.value, async (newStatus, oldStatus) => {
 // ============================================================================
 // Lifecycle
 // ============================================================================
-onMounted(async () => { loadLocalDatasets(); await checkOllamaTaggingStatus() })
+onMounted(async () => { datasetStore.browseFolder(''); await checkOllamaTaggingStatus() })
 onUnmounted(() => { dm.clearAllTrackedTimers(); stopOllamaStatusPolling(); cacheRefreshIntervalId = null })
 </script>
 
@@ -900,6 +987,17 @@ onUnmounted(() => { dm.clearAllTrackedTimers(); stopOllamaStatusPolling(); cache
   display: flex; align-items: center; gap: var(--space-md); flex-wrap: wrap;
   .el-divider--vertical { height: 32px; margin: 0; }
   .toolbar-section { display: flex; flex-direction: column; gap: var(--space-sm); }
+}
+
+.breadcrumb-bar {
+  padding: var(--space-sm) var(--space-lg); margin-bottom: var(--space-lg);
+  .breadcrumb-link { cursor: pointer; color: var(--primary); &:hover { text-decoration: underline; } }
+  .el-breadcrumb__item:last-child .breadcrumb-link { color: var(--text-primary); cursor: default; &:hover { text-decoration: none; } }
+}
+
+.subfolder-card {
+  border-left: 3px solid var(--el-color-warning);
+  .subfolder-icon { color: var(--el-color-warning); }
 }
 
 .dataset-info {

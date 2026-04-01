@@ -47,24 +47,45 @@
                 <el-input v-model="params.negative_prompt" type="textarea" :rows="2" placeholder="不想要的内容，如：blurry, low quality, watermark..." resize="none" class="prompt-input negative-prompt" />
               </div>
 
-              <!-- LoRA -->
+              <!-- Multi-LoRA -->
               <div class="param-group">
-                <div class="group-label">LORA 模型</div>
-                <el-select v-model="params.lora_path" placeholder="选择 LoRA 模型..." clearable filterable style="width: 100%;">
-                  <el-option v-for="lora in loraList" :key="lora.path" :label="lora.name" :value="lora.path">
-                    <span style="float: left">{{ lora.name }}</span>
-                    <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px">
-                      {{ (lora.size_bytes / 1024 / 1024).toFixed(1) }} MB
-                    </span>
-                  </el-option>
-                </el-select>
-
-                <div v-if="params.lora_path" class="lora-settings">
-                  <div class="control-row">
-                    <span class="label">权重</span>
-                    <el-slider v-model="params.lora_scale" :min="0" :max="2" :step="0.05" :show-tooltip="false" class="slider-flex" />
-                    <el-input-number v-model="params.lora_scale" :min="0" :max="2" :step="0.05" controls-position="right" class="input-fixed" />
+                <div class="group-label">
+                  LORA 模型
+                  <el-tag v-if="params.lora_configs.length > 0" size="small" type="primary" effect="plain" style="margin-left: 8px;">
+                    {{ params.lora_configs.length }} 个
+                  </el-tag>
+                </div>
+                
+                <!-- LoRA slots -->
+                <div v-for="(lora, index) in params.lora_configs" :key="index" class="lora-slot">
+                  <div class="lora-slot-header">
+                    <el-tag size="small" type="info" effect="plain">#{{ index + 1 }}</el-tag>
+                    <el-button type="danger" link size="small" @click="removeLoraSlot(index)">
+                      <el-icon><Close /></el-icon>
+                    </el-button>
                   </div>
+                  <el-select v-model="lora.path" placeholder="选择 LoRA 模型..." clearable filterable style="width: 100%;">
+                    <el-option v-for="l in loraList" :key="l.path" :label="l.name" :value="l.path">
+                      <span style="float: left">{{ l.name }}</span>
+                      <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px">
+                        {{ (l.size_bytes / 1024 / 1024).toFixed(1) }} MB
+                      </span>
+                    </el-option>
+                  </el-select>
+                  <div v-if="lora.path" class="control-row" style="margin-top: 8px;">
+                    <span class="label">权重</span>
+                    <el-slider v-model="lora.scale" :min="0" :max="2" :step="0.05" :show-tooltip="false" class="slider-flex" />
+                    <el-input-number v-model="lora.scale" :min="0" :max="2" :step="0.05" controls-position="right" class="input-fixed" />
+                  </div>
+                </div>
+
+                <!-- Add LoRA button -->
+                <el-button class="add-lora-btn" @click="addLoraSlot" :disabled="params.lora_configs.length >= 5">
+                  <el-icon><Plus /></el-icon> 添加 LoRA
+                </el-button>
+
+                <!-- Comparison mode (only when at least 1 LoRA) -->
+                <div v-if="params.lora_configs.length > 0 && params.lora_configs.some(l => l.path)" class="lora-settings">
                   <div class="control-row">
                     <span class="label">对比</span>
                     <el-switch v-model="params.comparison_mode" active-text="生成原图对比" />
@@ -162,8 +183,7 @@
                       <img :src="sse.comparisonImages.value[1].image" class="comparison-image" draggable="false" />
                       <div class="comparison-label lora-label">
                         <el-icon><MagicStick /></el-icon>
-                        LoRA: {{ getLoraFileName(sse.comparisonImages.value[1].lora_path) }}
-                        <span class="lora-weight">(权重: {{ sse.comparisonImages.value[1].lora_scale?.toFixed(2) || params.lora_scale.toFixed(2) }})</span>
+                        {{ getComparisonLoraLabel(sse.comparisonImages.value[1]) }}
                       </div>
                     </div>
                   </div>
@@ -304,7 +324,7 @@
                   <img :src="`/api/generation/image/${lightboxItem.comparison_images[1].image_path.split('/').pop().replace('.png','')}`" class="comparison-image" draggable="false" />
                   <div class="comparison-label lora-label">
                     <el-icon><MagicStick /></el-icon>
-                    LoRA: {{ getLoraFileName(lightboxItem.comparison_images[1].lora_path) }} (权重: {{ lightboxItem.comparison_images[1].lora_scale }})
+                    {{ getLightboxLoraLabel(lightboxItem) }}
                   </div>
                 </div>
               </div>
@@ -332,9 +352,13 @@
             <div class="info-item"><span class="label">CFG:</span><span class="text">{{ getHistoryMeta(lightboxItem).guidance_scale }}</span></div>
             <div class="info-item"><span class="label">Seed:</span><span class="text">{{ getHistoryMeta(lightboxItem).seed }}</span></div>
             <div class="info-item"><span class="label">Model:</span><el-tag size="small" type="primary">Z-Image</el-tag></div>
-            <div class="info-item" v-if="getHistoryMeta(lightboxItem).lora_path">
+            <div class="info-item" v-if="getLoraConfigsFromMeta(getHistoryMeta(lightboxItem)).length > 0">
               <span class="label">LoRA:</span>
-              <span class="text">{{ getHistoryMeta(lightboxItem).lora_path.split('/').pop() }} ({{ getHistoryMeta(lightboxItem).lora_scale }})</span>
+              <span class="text">
+                <span v-for="(lc, i) in getLoraConfigsFromMeta(getHistoryMeta(lightboxItem))" :key="i">
+                  {{ getLoraFileName(lc.path) }} ({{ lc.scale }}){{ i < getLoraConfigsFromMeta(getHistoryMeta(lightboxItem)).length - 1 ? ' + ' : '' }}
+                </span>
+              </span>
             </div>
             <div class="info-item" v-if="isComparisonEntry(lightboxItem)">
               <el-tag size="small" type="warning">VS 对比模式</el-tag>
@@ -354,6 +378,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useImageZoom } from '@/composables/useImageZoom'
 import { useGenerationSSE } from '@/composables/useGenerationSSE'
 
+// Types
+interface LoraSlot {
+  path: string | null
+  scale: number
+}
+
 // Composables
 const sse = useGenerationSSE()
 const mainZoom = useImageZoom()
@@ -365,18 +395,42 @@ const defaultParams = {
   negative_prompt: "",
   steps: 9, guidance_scale: 1.0, seed: -1,
   width: 1024, height: 1024,
-  lora_path: null as string | null,
-  lora_scale: 1.0,
+  lora_configs: [] as LoraSlot[],
   comparison_mode: false,
   model_type: "zimage",
   transformer_path: null as string | null,
 }
 
 const savedParams = sse.loadSavedParams()
-const params = ref(savedParams ? { ...defaultParams, ...savedParams } : { ...defaultParams })
+const params = ref(migrateParams(savedParams ? { ...defaultParams, ...savedParams } : { ...defaultParams }))
+
+/** Migrate old single-lora params to multi-lora format */
+function migrateParams(p: any) {
+  if (!p.lora_configs) {
+    p.lora_configs = []
+  }
+  // Migrate legacy lora_path → lora_configs[0]
+  if (p.lora_path && p.lora_configs.length === 0) {
+    p.lora_configs.push({ path: p.lora_path, scale: p.lora_scale || 1.0 })
+  }
+  // Clean up legacy fields
+  delete p.lora_path
+  delete p.lora_scale
+  return p
+}
 
 // Auto-save params
 watch(params, (v) => sse.saveParams(v), { deep: true })
+
+// Multi-LoRA slot management
+const addLoraSlot = () => {
+  if (params.value.lora_configs.length < 5) {
+    params.value.lora_configs.push({ path: null, scale: 1.0 })
+  }
+}
+const removeLoraSlot = (index: number) => {
+  params.value.lora_configs.splice(index, 1)
+}
 
 // History
 const loadingHistory = ref(false)
@@ -414,6 +468,44 @@ const getLoraFileName = (path: string | null) => {
   return path.split(/[\/\\]/).pop()?.replace('.safetensors', '') || 'Unknown'
 }
 
+/** Get lora_configs from a history meta (supports both new and legacy format) */
+const getLoraConfigsFromMeta = (meta: any): { path: string, scale: number }[] => {
+  if (meta.lora_configs && Array.isArray(meta.lora_configs) && meta.lora_configs.length > 0) {
+    return meta.lora_configs
+  }
+  if (meta.lora_path) {
+    return [{ path: meta.lora_path, scale: meta.lora_scale || 1.0 }]
+  }
+  return []
+}
+
+/** Build comparison label for multi-LoRA */
+const getComparisonLoraLabel = (imgData: any) => {
+  const configs = imgData.lora_configs || []
+  if (configs.length > 1) {
+    return configs.map((c: any) => `${getLoraFileName(c.path)}@${c.scale?.toFixed(2)}`).join(' + ')
+  }
+  if (configs.length === 1) {
+    return `LoRA: ${getLoraFileName(configs[0].path)} (权重: ${configs[0].scale?.toFixed(2)})`
+  }
+  // Legacy fallback
+  if (imgData.lora_path) {
+    return `LoRA: ${getLoraFileName(imgData.lora_path)} (权重: ${imgData.lora_scale?.toFixed(2) || '1.00'})`
+  }
+  return 'LoRA'
+}
+
+const getLightboxLoraLabel = (item: any) => {
+  const lcs = getLoraConfigsFromMeta(item)
+  if (lcs.length > 1) {
+    return lcs.map(c => `${getLoraFileName(c.path)}@${c.scale}`).join(' + ')
+  }
+  if (lcs.length === 1) {
+    return `LoRA: ${getLoraFileName(lcs[0].path)} (权重: ${lcs[0].scale})`
+  }
+  return 'LoRA'
+}
+
 // History helpers for comparison entries
 const isComparisonEntry = (item: any) => {
   const meta = item.metadata || item
@@ -438,7 +530,9 @@ const getHistoryThumb = (item: any) => {
 // Generate (map frontend field names → backend DTO)
 const generateImage = () => {
   const p = params.value
-  const payload = {
+  // Filter out empty LoRA slots
+  const validLoras = p.lora_configs.filter((l: LoraSlot) => l.path)
+  const payload: any = {
     prompt: p.prompt,
     negative_prompt: p.negative_prompt,
     width: p.width,
@@ -446,10 +540,12 @@ const generateImage = () => {
     num_inference_steps: p.steps,
     guidance_scale: p.guidance_scale,
     seed: p.seed,
-    lora_path: p.lora_path,
-    lora_scale: p.lora_scale,
     transformer_path: p.transformer_path,
     comparison_mode: p.comparison_mode,
+  }
+  // Send as lora_configs (multi-LoRA)
+  if (validLoras.length > 0) {
+    payload.lora_configs = validLoras.map((l: LoraSlot) => ({ path: l.path, scale: l.scale }))
   }
   sse.generate(payload, () => { fetchHistory(1, true); mainZoom.resetZoom() })
 }
@@ -512,10 +608,15 @@ const restoreParams = (metadata: any) => {
   params.value.guidance_scale = meta.guidance_scale; params.value.seed = meta.seed
   params.value.width = meta.width; params.value.height = meta.height
   params.value.model_type = meta.model_type || "zimage"
-  if (meta.lora_path) {
-    params.value.lora_path = meta.lora_path; params.value.lora_scale = meta.lora_scale || 1.0
+  // Restore multi-LoRA configs
+  const loraConfigs = getLoraConfigsFromMeta(meta)
+  if (loraConfigs.length > 0) {
+    params.value.lora_configs = loraConfigs.map(c => ({ path: c.path, scale: c.scale || 1.0 }))
     params.value.comparison_mode = meta.comparison_mode || false
-  } else { params.value.lora_path = null; params.value.lora_scale = 1.0; params.value.comparison_mode = false }
+  } else {
+    params.value.lora_configs = []
+    params.value.comparison_mode = false
+  }
   ElMessage.success('参数已应用'); closeLightbox()
 }
 
@@ -541,15 +642,14 @@ const downloadComparisonImage = async () => {
   ctx.font = 'bold 16px sans-serif'
   ctx.fillStyle = 'rgba(48, 48, 48, 0.9)'; ctx.fillRect(0, 0, img1.width, hdr)
   ctx.fillStyle = '#ffffff'; ctx.fillText('📷 原始模型 (无 LoRA)', 12, 26)
-  const loraName = getLoraFileName(imgs[1].lora_path)
-  const loraScale = imgs[1].lora_scale?.toFixed(2) || params.value.lora_scale.toFixed(2)
+  const loraLabel = getComparisonLoraLabel(imgs[1])
   const grad = ctx.createLinearGradient(img1.width + gap, 0, canvas.width, 0)
   grad.addColorStop(0, 'rgba(64, 158, 255, 0.9)'); grad.addColorStop(1, 'rgba(103, 194, 58, 0.9)')
   ctx.fillStyle = grad; ctx.fillRect(img1.width + gap, 0, img2.width, hdr)
-  ctx.fillStyle = '#ffffff'; ctx.fillText(`✨ LoRA: ${loraName} (权重: ${loraScale})`, img1.width + gap + 12, 26)
+  ctx.fillStyle = '#ffffff'; ctx.fillText(`✨ ${loraLabel}`, img1.width + gap + 12, 26)
   ctx.drawImage(img1, 0, hdr); ctx.drawImage(img2, img1.width + gap, hdr)
   const link = document.createElement('a'); link.href = canvas.toDataURL('image/png')
-  link.download = `comparison_${loraName}_${Date.now()}.png`
+  link.download = `comparison_${Date.now()}.png`
   document.body.appendChild(link); link.click(); document.body.removeChild(link)
 }
 
@@ -571,11 +671,18 @@ onMounted(() => { fetchHistory(); fetchLoras(); fetchTransformers(); sse.checkPe
 .card-header span { display: flex; align-items: center; gap: 8px; }
 .params-form { display: flex; flex-direction: column; gap: 20px; }
 .param-group { background: var(--el-fill-color-lighter); padding: 16px; border-radius: 8px; border: 1px solid var(--el-border-color-lighter); }
-.group-label { font-size: 11px; font-weight: 700; color: var(--el-text-color-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+.group-label { font-size: 11px; font-weight: 700; color: var(--el-text-color-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; }
 .prompt-input :deep(.el-textarea__inner) { background: var(--el-bg-color); border-color: var(--el-border-color-light); font-family: inherit; }
 .model-selector { width: 100%; display: flex; }
 .model-selector :deep(.el-radio-button) { flex: 1; }
 .model-selector :deep(.el-radio-button__inner) { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; }
+
+/* Multi-LoRA slots */
+.lora-slot { background: var(--el-bg-color); border: 1px solid var(--el-border-color-light); border-radius: 6px; padding: 10px; margin-bottom: 8px; transition: border-color 0.2s; }
+.lora-slot:hover { border-color: var(--el-color-primary-light-5); }
+.lora-slot-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.add-lora-btn { width: 100%; border-style: dashed; margin-top: 4px; }
+.add-lora-btn:hover { border-color: var(--el-color-primary); color: var(--el-color-primary); }
 
 .ratio-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 16px; }
 .ratio-btn { width: 100%; padding: 6px 0; font-size: 11px; }
@@ -600,7 +707,7 @@ onMounted(() => { fetchHistory(); fetchLoras(); fetchTransformers(); sse.checkPe
 .comparison-image-wrapper { position: relative; }
 .comparison-image-inner { position: relative; line-height: 0; }
 .comparison-image-inner img { display: block; max-height: 100cqh; max-width: calc(50cqi - 10px); object-fit: contain; box-shadow: 0 0 20px rgba(0,0,0,0.5); border-radius: 4px; }
-.comparison-label { position: absolute; top: 8px; left: 8px; background: rgba(0, 0, 0, 0.75); color: #fff; padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; z-index: 10; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.comparison-label { position: absolute; top: 8px; left: 8px; background: rgba(0, 0, 0, 0.75); color: #fff; padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; z-index: 10; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 6px; white-space: nowrap; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; }
 .comparison-label.original-label { background: rgba(48, 48, 48, 0.85); }
 .comparison-label.lora-label { background: linear-gradient(135deg, rgba(64, 158, 255, 0.9), rgba(103, 194, 58, 0.9)); }
 .comparison-divider { width: 2px; align-self: stretch; background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.4), transparent); flex-shrink: 0; }
@@ -661,7 +768,7 @@ onMounted(() => { fetchHistory(); fetchLoras(); fetchTransformers(); sse.checkPe
 .lightbox-image-container:active { cursor: grabbing; }
 .lightbox-image { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
 .lightbox-info { padding: 16px 24px; background: #1a1a1a; border-top: 1px solid #333; color: #ccc; max-height: 150px; overflow-y: auto; flex-shrink: 0; }
-.info-row { display: flex; gap: 40px; margin-top: 12px; }
+.info-row { display: flex; gap: 40px; margin-top: 12px; flex-wrap: wrap; }
 .info-item { display: flex; gap: 8px; }
 .info-item .label { color: #888; font-weight: bold; }
 .info-item .text { color: #eee; font-family: monospace; }

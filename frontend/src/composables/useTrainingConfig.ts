@@ -71,15 +71,18 @@ export function useTrainingConfig() {
                 curvature_start_epoch: 0,
                 cfg_training: false,
                 cfg_scale: 7.0,
-                cfg_training_ratio: 0.3
+                cfg_training_ratio: 0.3,
+                loss_weighting: 'none' as string
             },
             network: { dim: 8, alpha: 4.0 },
             lora: {
                 resume_training: false,
                 resume_lora_path: '',
                 train_adaln: false,
+                train_refiner: false,
                 train_norm: false,
-                train_single_stream: false
+                train_single_stream: false,
+                enable_ste_tanh: false
             },
             controlnet: {
                 resume_training: false,
@@ -119,6 +122,8 @@ export function useTrainingConfig() {
                 dino_model: '',
                 dino_image_size: 512,
                 dino_feature_mode: 'patch',
+                enable_dino_mask: false,
+                dino_mask_base_ratio: 0.2,
             },
             dataset: {
                 batch_size: 1,
@@ -208,12 +213,21 @@ export function useTrainingConfig() {
         } catch (e) { console.error('Failed to load config list:', e) }
     }
 
+    // Only keep keys that exist in the default config (strip legacy/removed fields)
+    function pickKeys<T extends Record<string, any>>(source: T, template: Record<string, any>): T {
+        const result = {} as any
+        for (const key of Object.keys(template)) {
+            if (key in source) result[key] = source[key]
+        }
+        return result as T
+    }
+
     async function loadConfig(configName: string) {
         loading.value = true
         try {
             const res = await axios.get(`/api/training/config/${configName}`)
             const defaultCfg = getDefaultConfig()
-            config.value = {
+            const merged = {
                 ...defaultCfg,
                 ...res.data,
                 timestep: { ...defaultCfg.timestep, ...res.data.timestep },
@@ -232,6 +246,15 @@ export function useTrainingConfig() {
                 },
                 advanced: { ...defaultCfg.advanced, ...res.data.advanced }
             }
+            // Strip legacy fields not in default config
+            merged.timestep = pickKeys(merged.timestep, defaultCfg.timestep)
+            merged.acrf = pickKeys(merged.acrf, defaultCfg.acrf)
+            merged.network = pickKeys(merged.network, defaultCfg.network)
+            merged.lora = pickKeys(merged.lora, defaultCfg.lora)
+            merged.optimizer = pickKeys(merged.optimizer, defaultCfg.optimizer)
+            merged.training = pickKeys(merged.training, defaultCfg.training)
+            merged.advanced = pickKeys(merged.advanced, defaultCfg.advanced)
+            config.value = merged
             const lr = config.value.training.learning_rate || 0.0001
             config.value.training.learning_rate_str = lr >= 0.001 ? lr.toString() : lr.toExponential()
             currentConfigName.value = configName
@@ -398,6 +421,15 @@ export function useTrainingConfig() {
         await loadCachedDatasets()
         await loadLoraList()
         fetchControlnets()
+        // Auto-fill dino_model from backend env if empty
+        if (!config.value.training.dino_model) {
+            try {
+                const res = await axios.get('/api/system/dino/status')
+                if (res.data.success && res.data.data?.status === 'ready') {
+                    config.value.training.dino_model = res.data.data.path
+                }
+            } catch { }
+        }
     }
 
     return {

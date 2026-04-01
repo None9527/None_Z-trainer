@@ -352,6 +352,7 @@ def create_network(
     train_adaln: bool = False,
     train_norm: bool = False,
     train_single_stream: bool = False,
+    train_refiner: bool = False,
     **kwargs,
 ) -> LoRANetwork:
     """
@@ -368,6 +369,7 @@ def create_network(
         train_adaln: 是否训练 AdaLN 调制层
         train_norm: 是否训练 Norm 层
         train_single_stream: 是否训练 Single Stream 层
+        train_refiner: 是否训练 noise_refiner 和 context_refiner 层
         
     Returns:
         LoRANetwork instance
@@ -393,6 +395,11 @@ def create_network(
     if train_single_stream:
         target_names.append("single_stream")
         logger.info("[LoRA] Single Stream 层训练已启用")
+    
+    if train_refiner:
+        # 移除 refiner 排除规则，允许 noise_refiner/context_refiner 被 LoRA 训练
+        exclude_patterns = [p for p in exclude_patterns if "refiner" not in p]
+        logger.info("[LoRA] Refiner 层训练已启用 (noise_refiner + context_refiner)")
     
     return LoRANetwork(
         unet=unet,

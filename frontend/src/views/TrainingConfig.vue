@@ -216,6 +216,24 @@
                 </span>
                 <el-switch v-model="tc.config.value.lora.train_adaln" />
               </div>
+              <div class="control-row">
+                <span class="label">
+                  训练 Refiner
+                  <el-tooltip content="训练 noise_refiner 和 context_refiner，增强输入 token 预处理能力" placement="top">
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+                <el-switch v-model="tc.config.value.lora.train_refiner" />
+              </div>
+              <div class="control-row">
+                <span class="label">
+                  STE Tanh
+                  <el-tooltip content="启用 Straight-Through Estimator 绕过 tanh 门控梯度压缩，改善 LoRA 梯度流" placement="top">
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+                <el-switch v-model="tc.config.value.lora.enable_ste_tanh" />
+              </div>
             </template>
           </div>
         </el-collapse-item>
@@ -261,7 +279,7 @@
             <div class="form-row-full">
               <label>
                 优化器类型
-                <el-tooltip content="AdamW8bit 省显存，Adafactor 更省但可能不稳定，Prodigy 自适应LR" placement="top">
+                <el-tooltip content="Muon 推荐: 正交化梯度，免疫RMSNorm压缩。AdamW8bit 省显存，Prodigy 自适应LR" placement="top">
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </label>
@@ -269,7 +287,10 @@
                 <el-option label="AdamW" value="AdamW" />
                 <el-option label="AdamW8bit (显存优化)" value="AdamW8bit" />
                 <el-option label="AdamWFP8 (FP8精度更高)" value="AdamWFP8" />
+                <el-option label="AdamWFP8SR (FP8+随机舍入)" value="AdamWFP8SR" />
                 <el-option label="AdamWBF16 (BF16平衡)" value="AdamWBF16" />
+                <el-option label="Muon (正交化梯度, 抗Norm压缩) ⚡推荐" value="Muon" />
+                <el-option label="MuonFP8 (Muon+FP8省显存) ⚡推荐" value="MuonFP8" />
                 <el-option label="Adafactor" value="Adafactor" />
                 <el-option label="Prodigy (自适应LR)" value="Prodigy" />
                 <el-option label="Lion (显存低)" value="Lion" />
@@ -284,6 +305,19 @@
                 </el-tooltip>
               </label>
               <el-switch v-model="tc.config.value.optimizer.relative_step" />
+            </div>
+
+            <div class="form-row-full">
+              <label>
+                Loss 加权策略
+                <el-tooltip content="Gaussian: 中间时间步权重高、两端低 (ZTuner BSMNTW 风格)。与 SNR 独立，可同时启用" placement="top">
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </label>
+              <el-select v-model="tc.config.value.acrf.loss_weighting" style="width: 100%">
+                <el-option label="无 (均匀权重)" value="none" />
+                <el-option label="Gaussian (中间高两端低)" value="gaussian" />
+              </el-select>
             </div>
             <div class="form-row-full" v-if="tc.config.value.optimizer.type !== 'Prodigy' && !(tc.config.value.optimizer.type === 'Adafactor' && tc.config.value.optimizer.relative_step)">
               <label>
@@ -722,58 +756,31 @@
               </div>
             </template>
 
-            <!-- DINOv3 感知 Loss -->
-            <div class="subsection-label">🧠 DINOv3 感知损失 (语义一致性)</div>
+            <!-- DINOv3 空间注意力掩码 -->
+            <div class="subsection-label">🧠 DINOv3 语义引导 (空间注意力掩码)</div>
             <div class="control-row">
               <span class="label">
-                启用 DINOv3 Loss
-                <el-tooltip content="使用 DINOv3 ViT 提取语义特征，约束生成图与目标图的语义一致性。需预缓存 DINOv3 embedding" placement="top">
+                启用 DINOv3 引导
+                <el-tooltip content="利用 DINOv3 的空间注意力热力图作为 MSE/L1 Loss 的空间权重掩码。高语义区域（人脸/结构）获得更强梯度，背景区域梯度被压缩。需预缓存 DINO embedding" placement="top">
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </span>
-              <el-switch v-model="tc.config.value.training.enable_dino" />
+              <el-switch v-model="tc.config.value.training.enable_dino_mask" />
             </div>
-            <template v-if="tc.config.value.training.enable_dino">
-              <div class="control-row">
-                <span class="label">DINOv3 权重 (λ_dino)</span>
-                <el-slider v-model="tc.config.value.training.lambda_dino" :min="0.01" :max="1" :step="0.01" :show-tooltip="false" class="slider-flex" />
-                <el-input-number v-model="tc.config.value.training.lambda_dino" :min="0.01" :max="1" :step="0.01" controls-position="right" class="input-fixed" />
-              </div>
-              <div class="control-row">
+            <template v-if="tc.config.value.training.enable_dino_mask">
+              <div class="control-row" style="margin-left: 20px;">
                 <span class="label">
-                  特征模式
-                  <el-tooltip placement="top">
-                    <template #content>
-                      <div>patch: 逐区域对比（精确还原）</div>
-                      <div>cls: 全局语义对比（风格/美学）</div>
-                      <div>both: 两者结合</div>
-                    </template>
+                  ↳ 背景保留比 (Base Ratio)
+                  <el-tooltip content="背景区域保留的最低梯度比例。0=完全忽略背景，0.3=保留30%。推荐 0.2" placement="top">
                     <el-icon class="help-icon"><QuestionFilled /></el-icon>
                   </el-tooltip>
                 </span>
-                <el-select v-model="tc.config.value.training.dino_feature_mode" style="width: 180px">
-                  <el-option label="Patch (逐区域)" value="patch" />
-                  <el-option label="CLS (全局美学)" value="cls" />
-                  <el-option label="Both (组合)" value="both" />
-                </el-select>
+                <el-slider v-model="tc.config.value.training.dino_mask_base_ratio" :min="0" :max="0.5" :step="0.05" :show-tooltip="false" class="slider-flex" />
+                <el-input-number v-model="tc.config.value.training.dino_mask_base_ratio" :min="0" :max="0.5" :step="0.05" controls-position="right" class="input-fixed" />
               </div>
-              <div class="form-row-full">
-                <label>
-                  DINOv3 模型路径
-                  <el-tooltip content="由 .env 中 DINO_MODEL_PATH 统一配置" placement="top">
-                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </label>
-                <el-input :model-value="tc.config.value.training.dino_model || '(由 .env DINO_MODEL_PATH 配置)'" readonly disabled />
-              </div>
-              <div class="control-row">
-                <span class="label">DINOv3 分辨率</span>
-                <el-select v-model="tc.config.value.training.dino_image_size" style="width: 180px">
-                  <el-option label="224 (最轻量)" :value="224" />
-                  <el-option label="384" :value="384" />
-                  <el-option label="512 (推荐)" :value="512" />
-                </el-select>
-              </div>
+              <el-alert type="info" :closable="false" show-icon style="margin-top: 8px">
+                DINOv3 模型路径由 .env 中 DINO_MODEL_PATH 配置。启用前需先缓存 DINO embedding（含 dino_mask）
+              </el-alert>
             </template>
 
             <!-- REPA -->

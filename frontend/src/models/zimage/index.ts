@@ -53,7 +53,8 @@ const zimageModel: ModelDefinition = {
             curvature_start_epoch: 0,
             cfg_training: false,
             cfg_scale: 7.0,
-            cfg_training_ratio: 0.3
+            cfg_training_ratio: 0.3,
+            loss_weighting: 'none'
         }
     },
 

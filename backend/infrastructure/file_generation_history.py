@@ -3,6 +3,7 @@
 File Generation History Repository - Infrastructure Implementation
 
 Persists generation history to a JSON file.
+Supports multi-LoRA configs in history entries.
 """
 
 import json
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from ..domain.generation.repositories import IGenerationHistoryRepository
-from ..domain.generation.entities import GenerationResult
+from ..domain.generation.entities import GenerationResult, LoRAConfig
 
 logger = logging.getLogger(__name__)
 
@@ -37,17 +38,21 @@ class FileGenerationHistoryRepository(IGenerationHistoryRepository):
             "steps": result.steps,
             "guidance_scale": result.guidance_scale,
         }
-        if result.lora_path:
-            entry["lora_path"] = result.lora_path
-            entry["lora_scale"] = result.lora_scale
+        # Multi-LoRA: store as lora_configs list
+        if result.lora_configs:
+            entry["lora_configs"] = [c.to_dict() for c in result.lora_configs]
+            # Compat: also store first lora as lora_path/lora_scale for old UI reads
+            entry["lora_path"] = result.lora_configs[0].path
+            entry["lora_scale"] = result.lora_configs[0].scale
         history.insert(0, entry)
         self._save_history(history)
 
     def save_comparison(self, result_no_lora: GenerationResult,
                         result_with_lora: GenerationResult,
-                        lora_path: str, lora_scale: float) -> None:
+                        lora_configs: List[LoRAConfig]) -> None:
         """Save a comparison pair as a single grouped history entry."""
         history = self._load_history()
+        lora_configs_dicts = [c.to_dict() for c in lora_configs]
         entry = {
             "timestamp": result_with_lora.timestamp,
             "comparison_mode": True,
@@ -57,11 +62,18 @@ class FileGenerationHistoryRepository(IGenerationHistoryRepository):
             "height": result_with_lora.height,
             "steps": result_with_lora.steps,
             "guidance_scale": result_with_lora.guidance_scale,
-            "lora_path": lora_path,
-            "lora_scale": lora_scale,
+            "lora_configs": lora_configs_dicts,
+            # Compat
+            "lora_path": lora_configs[0].path if lora_configs else None,
+            "lora_scale": lora_configs[0].scale if lora_configs else 1.0,
             "comparison_images": [
                 {"image_path": result_no_lora.image_path, "lora_path": None, "lora_scale": 0},
-                {"image_path": result_with_lora.image_path, "lora_path": lora_path, "lora_scale": lora_scale},
+                {
+                    "image_path": result_with_lora.image_path,
+                    "lora_configs": lora_configs_dicts,
+                    "lora_path": lora_configs[0].path if lora_configs else None,
+                    "lora_scale": lora_configs[0].scale if lora_configs else 1.0,
+                },
             ],
         }
         history.insert(0, entry)
@@ -81,6 +93,18 @@ class FileGenerationHistoryRepository(IGenerationHistoryRepository):
                 # Return comparison entries as raw dicts
                 results.append(item)
             else:
+                # Rebuild lora_configs from stored data
+                lora_configs = []
+                if item.get("lora_configs"):
+                    for lc in item["lora_configs"]:
+                        lora_configs.append(LoRAConfig(
+                            path=lc["path"], scale=lc.get("scale", 1.0)))
+                elif item.get("lora_path"):
+                    # Legacy single-lora entry
+                    lora_configs.append(LoRAConfig(
+                        path=item["lora_path"],
+                        scale=item.get("lora_scale", 1.0)))
+
                 results.append(GenerationResult(
                     timestamp=item.get("timestamp", ""),
                     image_path=item.get("image_path", ""),
@@ -90,8 +114,7 @@ class FileGenerationHistoryRepository(IGenerationHistoryRepository):
                     height=item.get("height", 0),
                     steps=item.get("steps", 0),
                     guidance_scale=item.get("guidance_scale", 0.0),
-                    lora_path=item.get("lora_path"),
-                    lora_scale=item.get("lora_scale", 1.0),
+                    lora_configs=lora_configs,
                 ))
         return results, total
 

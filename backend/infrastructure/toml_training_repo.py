@@ -127,6 +127,7 @@ class TomlTrainingRepository(ITrainingRepository):
         lines.append(f"cfg_training = {_bool(acrf.get('cfg_training', False))}")
         lines.append(f"cfg_scale = {float(acrf.get('cfg_scale', 7.0))}")
         lines.append(f"cfg_training_ratio = {float(acrf.get('cfg_training_ratio', 0.3))}")
+        lines.append(f'loss_weighting = "{acrf.get("loss_weighting", "none")}"')
         lines.append("")
 
         # ── [network] ──
@@ -140,8 +141,10 @@ class TomlTrainingRepository(ITrainingRepository):
         lines.append(f"resume_training = {_bool(lora.get('resume_training', False))}")
         lines.append(f'resume_lora_path = "{lora.get("resume_lora_path", "")}"')
         lines.append(f"train_adaln = {_bool(lora.get('train_adaln', False))}")
+        lines.append(f"train_refiner = {_bool(lora.get('train_refiner', False))}")
         lines.append(f"train_norm = {_bool(lora.get('train_norm', False))}")
         lines.append(f"train_single_stream = {_bool(lora.get('train_single_stream', False))}")
+        lines.append(f"enable_ste_tanh = {_bool(lora.get('enable_ste_tanh', False))}")
         lines.append("")
 
         # ── [controlnet] ──
@@ -186,6 +189,8 @@ class TomlTrainingRepository(ITrainingRepository):
         lines.append(f"lambda_style = {float(training.get('lambda_style', 0.3))}")
         lines.append(f"lambda_light = {float(training.get('lambda_light', 0.5))}")
         lines.append(f"lambda_color = {float(training.get('lambda_color', 0.3))}")
+        lines.append(f"enable_dino_mask = {_bool(training.get('enable_dino_mask', False))}")
+        lines.append(f"dino_mask_base_ratio = {float(training.get('dino_mask_base_ratio', 0.2))}")
 
         lines.append("")
 

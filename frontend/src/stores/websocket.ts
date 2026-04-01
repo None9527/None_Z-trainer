@@ -434,13 +434,9 @@ export const useWebSocketStore = defineStore('websocket', () => {
         trainingStore.progress.totalEpochs = parseInt(message.training.num_train_epochs) || 0
       }
 
-      // 实时 step 日志输出
-      if (message.training.running && message.training.current_step && message.training.current_step !== lastLoggedStep) {
+      // step 日志已由 training_log 消息推送，此处仅更新 lastLoggedStep 防止其他地方重复
+      if (message.training.running && message.training.current_step) {
         lastLoggedStep = message.training.current_step
-        const loss = message.training.current_loss || '?'
-        const lr = message.training.current_lr || '?'
-        const epoch = message.training.current_epoch || '?'
-        addLog(`[Step ${message.training.current_step}] epoch=${epoch} loss=${loss} lr=${lr}`, 'info')
       }
 
       // 从加载中变为训练中时添加日志

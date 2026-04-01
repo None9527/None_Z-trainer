@@ -29,6 +29,11 @@ router = APIRouter(prefix="/api", tags=["Generation"])
 
 # ── DTOs ──
 
+class LoRAConfigDTO(BaseModel):
+    path: str
+    scale: float = 1.0
+
+
 class GenerationRequestDTO(BaseModel):
     prompt: str = ""
     negative_prompt: str = ""
@@ -38,6 +43,9 @@ class GenerationRequestDTO(BaseModel):
     guidance_scale: float = 3.5
     seed: int = -1
     num_images: int = 1
+    # Multi-LoRA (new)
+    lora_configs: Optional[List[LoRAConfigDTO]] = None
+    # Single-LoRA (legacy compat)
     lora_path: Optional[str] = None
     lora_scale: float = 1.0
     transformer_path: Optional[str] = None
@@ -220,7 +228,8 @@ async def generate_image_stream(req: GenerationRequestDTO):
             )
 
             # Determine if this is a comparison run
-            is_comparison = req.comparison_mode and req.lora_path
+            has_loras = len(domain_req.lora_configs) > 0
+            is_comparison = req.comparison_mode and has_loras
 
             if is_comparison:
                 _do_comparison_generate(pipeline, domain_req, req, task_id, progress_queue, task_manager, TaskState)
@@ -336,12 +345,16 @@ def _do_single_generate(pipeline, domain_req, req, task_id, progress_queue, task
         img_path = Path(r.image_path)
         img_b64 = base64.b64encode(img_path.read_bytes()).decode() if img_path.exists() else ""
 
+        # Build lora info for result
+        lora_configs_data = [c.to_dict() for c in r.lora_configs] if r.lora_configs else []
+
         result_data = {
             "success": True,
             "image": img_b64,
             "seed": r.seed,
             "timestamp": r.timestamp,
             "comparison_mode": False,
+            "lora_configs": lora_configs_data,
         }
 
         task_manager.update_task(task_id,
@@ -370,7 +383,7 @@ def _do_single_generate(pipeline, domain_req, req, task_id, progress_queue, task
 
 
 def _do_comparison_generate(pipeline, domain_req, req, task_id, progress_queue, task_manager, TaskState):
-    """Two-pass comparison: generate without LoRA, then with LoRA (same seed)."""
+    """Two-pass comparison: generate without LoRA, then with all LoRAs (same seed)."""
     from ..domain.generation.entities import GenerationRequest
     from ..infrastructure.container import container
     import torch
@@ -404,8 +417,7 @@ def _do_comparison_generate(pipeline, domain_req, req, task_id, progress_queue, 
         guidance_scale=domain_req.guidance_scale,
         seed=fixed_seed,
         num_images=1,
-        lora_path=None,
-        lora_scale=1.0,
+        lora_configs=[],
         transformer_path=domain_req.transformer_path,
     )
 
@@ -423,18 +435,21 @@ def _do_comparison_generate(pipeline, domain_req, req, task_id, progress_queue, 
     results_no_lora = pipeline.generate_with_callback(req_no_lora, on_step_pass1)
     print(f"[TIMING] Pass 1 complete", flush=True)
 
-    # ── Pass 2: With LoRA ──
+    # ── Pass 2: With all LoRAs ──
+    lora_desc = ", ".join(
+        f"{Path(c.path).stem}@{c.scale}" for c in domain_req.lora_configs
+    )
     task_manager.update_task(task_id,
         state=TaskState.GENERATING,
-        message="[2/2] 生成 LoRA 图..."
+        message=f"[2/2] 生成 LoRA 图 ({len(domain_req.lora_configs)} 个)..."
     )
     progress_queue.put({
         "task_id": task_id, "stage": "generating",
         "step": total_steps, "total": double_total,
-        "message": "[2/2] 生成 LoRA 对比图..."
+        "message": f"[2/2] 生成 LoRA 对比图 ({lora_desc})..."
     })
 
-    # Create request WITH LoRA (same seed to ensure fair comparison)
+    # Create request WITH all LoRAs (same seed to ensure fair comparison)
     req_with_lora = GenerationRequest(
         prompt=domain_req.prompt,
         negative_prompt=domain_req.negative_prompt,
@@ -444,8 +459,7 @@ def _do_comparison_generate(pipeline, domain_req, req, task_id, progress_queue, 
         guidance_scale=domain_req.guidance_scale,
         seed=fixed_seed,
         num_images=1,
-        lora_path=domain_req.lora_path,
-        lora_scale=domain_req.lora_scale,
+        lora_configs=list(domain_req.lora_configs),
         transformer_path=domain_req.transformer_path,
     )
     print(f"[TIMING] Starting pass 2 generate_with_callback", flush=True)
@@ -468,30 +482,34 @@ def _do_comparison_generate(pipeline, domain_req, req, task_id, progress_queue, 
     if results_no_lora and results_with_lora:
         history_repo = container.generation_history_repo()
 
-        # Save as a single grouped comparison entry
         r1 = results_no_lora[0]
         r2 = results_with_lora[0]
-        history_repo.save_comparison(r1, r2, req.lora_path, req.lora_scale)
+
+        # Save as a single grouped comparison entry
+        history_repo.save_comparison(r1, r2, domain_req.lora_configs)
+
+        lora_configs_data = [c.to_dict() for c in domain_req.lora_configs]
 
         images = []
         # Image 1: without LoRA
-        r1 = results_no_lora[0]
         p1 = Path(r1.image_path)
         b64_1 = base64.b64encode(p1.read_bytes()).decode() if p1.exists() else ""
         images.append({
             "image": b64_1,
             "lora_path": None,
             "lora_scale": 0,
+            "lora_configs": [],
         })
 
-        # Image 2: with LoRA
-        r2 = results_with_lora[0]
+        # Image 2: with LoRAs
         p2 = Path(r2.image_path)
         b64_2 = base64.b64encode(p2.read_bytes()).decode() if p2.exists() else ""
         images.append({
             "image": b64_2,
-            "lora_path": req.lora_path,
-            "lora_scale": req.lora_scale,
+            "lora_configs": lora_configs_data,
+            # Compat: first LoRA
+            "lora_path": domain_req.lora_configs[0].path if domain_req.lora_configs else None,
+            "lora_scale": domain_req.lora_configs[0].scale if domain_req.lora_configs else 1.0,
         })
 
         result_data = {
@@ -500,6 +518,7 @@ def _do_comparison_generate(pipeline, domain_req, req, task_id, progress_queue, 
             "images": images,
             "seed": r2.seed,
             "timestamp": r2.timestamp,
+            "lora_configs": lora_configs_data,
         }
 
         task_manager.update_task(task_id,
@@ -529,7 +548,17 @@ def _do_comparison_generate(pipeline, domain_req, req, task_id, progress_queue, 
 # ── Helpers ──
 
 def _to_domain_request(req: GenerationRequestDTO):
-    from ..domain.generation.entities import GenerationRequest
+    """Convert DTO to domain request, handling multi-LoRA and legacy single-LoRA."""
+    from ..domain.generation.entities import GenerationRequest, LoRAConfig
+
+    # Resolve LoRA configs: prefer lora_configs, fall back to legacy lora_path
+    lora_configs = []
+    if req.lora_configs:
+        for lc in req.lora_configs:
+            lora_configs.append(LoRAConfig(path=lc.path, scale=lc.scale))
+    elif req.lora_path:
+        lora_configs.append(LoRAConfig(path=req.lora_path, scale=req.lora_scale))
+
     return GenerationRequest(
         prompt=req.prompt,
         negative_prompt=req.negative_prompt,
@@ -539,7 +568,6 @@ def _to_domain_request(req: GenerationRequestDTO):
         guidance_scale=req.guidance_scale,
         seed=req.seed,
         num_images=req.num_images,
-        lora_path=req.lora_path,
-        lora_scale=req.lora_scale,
+        lora_configs=lora_configs,
         transformer_path=req.transformer_path,
     )
