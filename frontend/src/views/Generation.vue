@@ -299,7 +299,7 @@
           <div class="lightbox-title">历史记录详情</div>
           <div class="lightbox-actions">
             <el-button type="primary" @click="restoreParams((lightboxItem.metadata || lightboxItem))">应用此参数</el-button>
-            <el-button type="success" @click="downloadImage(lightboxItem.url || `/api/generation/image/${lightboxItem.timestamp}`)"><el-icon><Download /></el-icon> 下载</el-button>
+            <el-button type="success" @click="downloadHistoryItem(lightboxItem)"><el-icon><Download /></el-icon> 下载</el-button>
             <el-button type="danger" @click="deleteHistoryItem(lightboxItem, true)"><el-icon><Delete /></el-icon> 删除</el-button>
             <el-button circle @click="closeLightbox"><el-icon><Close /></el-icon></el-button>
           </div>
@@ -620,7 +620,7 @@ const restoreParams = (metadata: any) => {
   ElMessage.success('参数已应用'); closeLightbox()
 }
 
-// Download
+// Download current generated result (uses SSE state for comparison mode)
 const downloadImage = async (url: string | null) => {
   if (!url) return
   if (sse.isComparisonResult.value && sse.comparisonImages.value.length === 2) {
@@ -628,6 +628,44 @@ const downloadImage = async (url: string | null) => {
   }
   const link = document.createElement('a'); link.href = url
   link.download = `generated_${Date.now()}.png`
+  document.body.appendChild(link); link.click(); document.body.removeChild(link)
+}
+
+// Download a historical item — uses item's own URL, never touches SSE state
+const downloadHistoryItem = async (item: any) => {
+  if (!item) return
+  const meta = getHistoryMeta(item)
+  // Comparison history: stitch both images side by side
+  if (isComparisonEntry(item) && meta.comparison_images?.length === 2) {
+    try {
+      const ts0 = meta.comparison_images[0].image_path.split('/').pop()?.replace('.png', '') || ''
+      const ts1 = meta.comparison_images[1].image_path.split('/').pop()?.replace('.png', '') || ''
+      const url0 = `/api/generation/image/${ts0}`
+      const url1 = `/api/generation/image/${ts1}`
+      const img1 = await loadImg(url0); const img2 = await loadImg(url1)
+      const hdr = 40, gap = 10
+      const canvas = document.createElement('canvas')
+      canvas.width = img1.width + img2.width + gap; canvas.height = Math.max(img1.height, img2.height) + hdr
+      const ctx = canvas.getContext('2d')!
+      ctx.fillStyle = '#1e1e1e'; ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.font = 'bold 16px sans-serif'
+      ctx.fillStyle = 'rgba(48,48,48,0.9)'; ctx.fillRect(0, 0, img1.width, hdr)
+      ctx.fillStyle = '#fff'; ctx.fillText('📷 原始模型 (无 LoRA)', 12, 26)
+      const grad = ctx.createLinearGradient(img1.width + gap, 0, canvas.width, 0)
+      grad.addColorStop(0, 'rgba(64,158,255,0.9)'); grad.addColorStop(1, 'rgba(103,194,58,0.9)')
+      ctx.fillStyle = grad; ctx.fillRect(img1.width + gap, 0, img2.width, hdr)
+      ctx.fillStyle = '#fff'; ctx.fillText(`✨ ${getLightboxLoraLabel(item)}`, img1.width + gap + 12, 26)
+      ctx.drawImage(img1, 0, hdr); ctx.drawImage(img2, img1.width + gap, hdr)
+      const link = document.createElement('a'); link.href = canvas.toDataURL('image/png')
+      link.download = `comparison_${meta.timestamp || Date.now()}.png`
+      document.body.appendChild(link); link.click(); document.body.removeChild(link)
+      return
+    } catch {}
+  }
+  // Normal single image
+  const url = item.url || `/api/generation/image/${meta.timestamp}`
+  const link = document.createElement('a'); link.href = url
+  link.download = `generated_${meta.timestamp || Date.now()}.png`
   document.body.appendChild(link); link.click(); document.body.removeChild(link)
 }
 
